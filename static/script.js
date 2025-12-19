@@ -108,42 +108,20 @@ function renderChart(data) {
     // Position them at the END of the connector line (at closed model's ECI level)
     const matchedGaps = gaps.filter(g => g.matched);
 
-    // Separate exact and statistical matches for different hover templates
-    const exactMatches = matchedGaps.filter(g => g.match_type === 'exact');
-    const statisticalMatches = matchedGaps.filter(g => g.match_type === 'statistical');
-
-    if (exactMatches.length > 0) {
+    if (matchedGaps.length > 0) {
         traces.push({
-            x: exactMatches.map(g => g.open_date),
-            y: exactMatches.map(g => g.closed_eci),
+            x: matchedGaps.map(g => g.open_date),
+            y: matchedGaps.map(g => g.closed_eci),
             mode: 'markers',
             type: 'scatter',
-            name: 'Open model (exact)',
+            name: 'Open model',
             marker: {
                 color: COLORS.open,
                 size: 10,
                 symbol: 'square',
             },
-            hovertemplate: exactMatches.map(g =>
+            hovertemplate: matchedGaps.map(g =>
                 `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)} (≥ ${g.closed_eci.toFixed(1)})<br>Date: %{x}<extra></extra>`
-            ),
-        });
-    }
-
-    if (statisticalMatches.length > 0) {
-        traces.push({
-            x: statisticalMatches.map(g => g.open_date),
-            y: statisticalMatches.map(g => g.closed_eci),
-            mode: 'markers',
-            type: 'scatter',
-            name: 'Open model (statistical)',
-            marker: {
-                color: COLORS.open,
-                size: 10,
-                symbol: 'square',
-            },
-            hovertemplate: statisticalMatches.map(g =>
-                `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)} (≈ ${g.closed_eci.toFixed(1)}, not statistically different)<br>Date: %{x}<extra></extra>`
             ),
         });
     }
@@ -153,9 +131,6 @@ function renderChart(data) {
         const closedDate = new Date(gap.closed_date);
         const openDate = new Date(gap.open_date);
         const midDate = new Date((closedDate.getTime() + openDate.getTime()) / 2);
-
-        // Use dashed line for statistical matches, solid for exact matches
-        const isStatistical = gap.match_type === 'statistical';
 
         // Horizontal connector line
         shapes.push({
@@ -167,16 +142,14 @@ function renderChart(data) {
             line: {
                 color: COLORS.connector,
                 width: 2,
-                dash: isStatistical ? 'dash' : 'solid',
             },
         });
 
-        // Gap annotation above the line (add ~ for statistical matches)
-        const gapLabel = isStatistical ? `~${gap.gap_months} mo` : `${gap.gap_months} mo`;
+        // Gap annotation above the line
         annotations.push({
             x: midDate.toISOString().split('T')[0],
             y: gap.closed_eci,
-            text: gapLabel,
+            text: `${gap.gap_months} mo`,
             showarrow: false,
             font: {
                 size: 11,

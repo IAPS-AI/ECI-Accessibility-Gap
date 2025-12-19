@@ -94,6 +94,8 @@ def check_statistical_diff(row_open: pd.Series, row_closed: pd.Series, alpha: fl
     zcrit = float(norm.ppf(1 - alpha / 2))
 
     return z > zcrit
+    # Note: This function is currently unused in the strict matching logic,
+    # but kept for potential future use or reference.
 
 
 def fetch_eci_data() -> pd.DataFrame:
@@ -201,15 +203,9 @@ def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
                 continue
 
             # Check if open model is >= closed model's ECI
-            # or if the difference is not statistically significant (per notebook logic)
             if open_row["eci"] >= closed_eci:
                 matching_open = open_row
                 match_type = "exact"
-                break
-            elif not check_statistical_diff(open_row, closed_row):
-                # Statistically equivalent - counts as a match
-                matching_open = open_row
-                match_type = "statistical"
                 break
 
         if matching_open is not None:
@@ -268,7 +264,7 @@ def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
         }
     
     start_eci = max(df_open["eci"].min(), df_closed["eci"].min())
-    end_eci = min(df_open["eci"].max(), df_closed["eci"].max())
+    end_eci = max(df_open["eci"].max(), df_closed["eci"].max())
     
     horizontal_gaps = []
     
@@ -289,22 +285,21 @@ def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
             if pd.isna(row["eci"]) or pd.isna(row["date"]):
                 continue
                 
-            if row["eci"] < cur_eci:
-                # Check if statistically equivalent
-                is_statistically_lower = check_statistical_diff(row, cur_closed_model)
-                if not is_statistically_lower:
-                    cur_open_model = row
-                    gap = (cur_open_model["date"] - cur_closed_model["date"]).days / 30.5
-                    horizontal_gaps.append(gap)
-                    break
-                else:
-                    # Remove this model from future consideration
-                    df_open_possible = df_open_possible[df_open_possible["date"] > row["date"]]
-            else:
-                # ECI >= cur_eci, so it's a match
-                gap = (row["date"] - cur_closed_model["date"]).days / 30.5
+            if row["eci"] >= cur_eci:
+                cur_open_model = row
+                gap = (cur_open_model["date"] - cur_closed_model["date"]).days / 30.5
                 horizontal_gaps.append(gap)
                 break
+            else:
+                pass
+        
+        # If loop finished with no match, use current date
+        if cur_open_model is None:
+            now = datetime.now()
+            # Calculate gap from closed model release to now
+            # Only count if "now" is after release date (should be always true for valid data)
+            gap = (now - cur_closed_model["date"].to_pydatetime().replace(tzinfo=None)).days / 30.5
+            horizontal_gaps.append(gap)
     
     # Calculate statistics from sampled gaps
     if horizontal_gaps:
