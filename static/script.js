@@ -167,7 +167,7 @@ function renderTrendChart(data) {
         title: { text: '', font: { size: 16 } },
         margin: { l: 60, r: 60, t: 40, b: 60 },
         height: 500,
-        xaxis: { title: 'Date' },
+        xaxis: { title: 'Model Release Date' },
         yaxis: { title: 'ECI Score' },
         annotations: [
             ...annotations,
@@ -518,7 +518,7 @@ function renderChart(data) {
         showlegend: false,
         margin: { l: 60, r: 100, t: 20, b: 60 },
         xaxis: {
-            title: 'Model release date',
+            title: 'Model Release Date',
             titlefont: { size: 12, color: COLORS.annotation },
             tickfont: { size: 11, color: COLORS.annotation },
             gridcolor: COLORS.gridline,
