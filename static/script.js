@@ -494,7 +494,7 @@ function renderChart(data) {
             y: 130,
             xref: 'paper',
             yref: 'y',
-            text: 'Sonnet (130)',
+            text: 'Claude 3.5 Sonnet (130)',
             showarrow: false,
             xanchor: 'right',
             yanchor: 'bottom',
