@@ -484,7 +484,7 @@ function renderTable(models) {
         const eciValue = model.eci !== null ? model.eci.toFixed(1) : '-';
 
         row.innerHTML = `
-            <td>${model.display_name}</td>
+            <td>${model.model}</td>
             <td>${new Date(model.date).toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}</td>
             <td>${eciValue}</td>
             <td><span class=\"model-type ${typeClass}\">${typeLabel}</span></td>

@@ -134,6 +134,7 @@ def process_data() -> dict[str, Any]:
     df = fetch_eci_data()
 
     # Classify models as open or closed
+    df["Open"] = df["Model accessibility"].str.contains("Open", na=False)
 
     # Get rankings for each group
     df_open = df[df["Open"]].copy()
