@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import requests
 from flask import Flask, jsonify, render_template
-from scipy.stats import norm
+from scipy.stats import linregress, norm
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -147,7 +147,7 @@ def process_data() -> dict[str, Any]:
     df_combined = pd.concat([df_open, df_closed]).sort_values("date")
     df_frontier = df_combined[df_combined["group_rank"] <= 1].copy()
 
-    # Prepare model data for visualization
+    # Prepare model data for visualization (Frontier only)
     models = []
     for _, row in df_frontier.iterrows():
         models.append({
@@ -160,16 +160,36 @@ def process_data() -> dict[str, Any]:
             "is_open": bool(row["Open"]),
         })
 
-    # Calculate horizontal gaps (time for open to catch up)
+    # Prepare ALL models for trend visualization
+    trend_models = []
+    # Filter df_combined to ensure we have valid ECI and dates
+    df_all_valid = df_combined.dropna(subset=["eci", "date"])
+    for _, row in df_all_valid.iterrows():
+        trend_models.append({
+            "model": row.get("Model", row.get("model version", "Unknown")),
+            "display_name": row.get("Display name", row.get("Model", "Unknown")),
+            "eci": float(row["eci"]),
+            "eci_std": float(row["eci_std"]) if pd.notna(row.get("eci_std")) else None,
+            "date": row["date"].isoformat(),
+            "organization": row.get("Organization", "Unknown"),
+            "is_open": bool(row["Open"]),
+        })
+
+    # Calculate horizontal gaps (time for open to catch up) - still frontier based
     gaps = calculate_horizontal_gaps(df_frontier)
 
-    # Calculate statistics
+    # Calculate statistics - still frontier based
     stats = calculate_statistics(df_frontier, gaps)
+
+    # Calculate trends - USING ALL MODELS NOW
+    trends = calculate_trends(df_all_valid)
 
     return {
         "models": models,
+        "trend_models": trend_models,
         "gaps": gaps,
         "statistics": stats,
+        "trends": trends,
         "last_updated": datetime.now().isoformat(),
     }
 
@@ -241,6 +261,89 @@ def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
             })
 
     return gaps
+
+
+def calculate_trends(df: pd.DataFrame) -> dict:
+    """
+    Calculate trends for frontier models before and after 2025.
+    Returns:
+      - Absolute Growth (Linear slope ECI/year)
+      - Percentage Growth (Exponential fit)
+      - Multiples per Year
+      - Doubling Time
+    """
+    trends = {}
+    
+    cutoff = pd.Timestamp("2024-03-01")
+    
+    def get_stats(sub_df, name):
+        if len(sub_df) < 2:
+            return None
+            
+        # Prepare data
+        dates_ordinal = sub_df["date"].map(datetime.toordinal).values
+        ecis = sub_df["eci"].values
+        
+        # 1. Absolute Growth (Linear Regression: ECI ~ Date)
+        lin_slope, lin_intercept, _, _, _ = linregress(dates_ordinal, ecis)
+        yearly_absolute_growth = lin_slope * 365.25
+        
+        # Linear line points for plotting
+        start_date_ord = dates_ordinal.min()
+        end_date_ord = dates_ordinal.max()
+        
+        lin_start_eci = lin_slope * start_date_ord + lin_intercept
+        lin_end_eci = lin_slope * end_date_ord + lin_intercept
+        
+        # 2. Exponential Growth (Linear Regression: ln(ECI) ~ Date)
+        # Filter out non-positive ECIs if any (though ECI is usually > 0)
+        valid_indices = ecis > 0
+        if not np.any(valid_indices):
+            return None
+            
+        log_ecis = np.log(ecis[valid_indices])
+        log_dates = dates_ordinal[valid_indices]
+        
+        exp_slope, _, _, _, _ = linregress(log_dates, log_ecis)
+        
+        # Annual exponential rate constant (k in e^(kt))
+        k_annual = exp_slope * 365.25
+        
+        # Metrics
+        # Percentage Growth = (e^k - 1) * 100
+        pct_growth = (np.exp(k_annual) - 1) * 100
+        
+        # Multiples per Year = e^k
+        multiples_per_year = np.exp(k_annual)
+        
+        # Doubling Time = ln(2) / k
+        doubling_time_years = np.log(2) / k_annual if k_annual > 0 else float('inf')
+
+        return {
+            "name": name,
+            "absolute_growth_per_year": round(yearly_absolute_growth, 2),
+            "percentage_growth_annualized": round(pct_growth, 1),
+            "multiples_per_year": round(multiples_per_year, 2),
+            "doubling_time_years": round(doubling_time_years, 2),
+            "start_point": {
+                "date": datetime.fromordinal(int(start_date_ord)).isoformat(),
+                "eci": lin_start_eci
+            },
+            "end_point": {
+                "date": datetime.fromordinal(int(end_date_ord)).isoformat(),
+                "eci": lin_end_eci
+            }
+        }
+
+    # Pre-2024
+    pre_2024 = df[df["date"] < cutoff]
+    trends["pre_mar_2024"] = get_stats(pre_2024, "Pre-Mar 2024")
+    
+    # Post-2024
+    post_2024 = df[df["date"] >= cutoff]
+    trends["post_mar_2024"] = get_stats(post_2024, "Post-Mar 2024")
+    
+    return trends
 
 
 def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:

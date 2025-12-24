@@ -31,6 +31,7 @@ async function init() {
 
         // Render chart and update UI
         renderChart(data);
+        renderTrendChart(data);
         updateStats(data.statistics);
         updateTitle(data.statistics.avg_horizontal_gap_months);
         updateLastUpdated(data.last_updated);
@@ -42,6 +43,172 @@ async function init() {
             <p style="color: #e53935;">Failed to load data. Please try refreshing.</p>
         `;
     }
+}
+
+/**
+ * Render the trend chart showing pre/post 2025 regression lines
+ */
+function renderTrendChart(data) {
+    const trends = data.trends;
+    const models = data.trend_models || data.models; // Fallback only if backend not updated immediately
+    const traces = [];
+
+    // All models scatter
+    const closedModels = models.filter(m => !m.is_open && m.date && m.eci);
+    const openModels = models.filter(m => m.is_open && m.date && m.eci);
+
+    traces.push({
+        x: closedModels.map(m => m.date),
+        y: closedModels.map(m => m.eci),
+        mode: 'markers',
+        type: 'scatter',
+        name: 'Closed',
+        marker: { color: COLORS.closed, size: 8, opacity: 0.6 },
+        text: closedModels.map(m => m.display_name),
+    });
+
+    traces.push({
+        x: openModels.map(m => m.date),
+        y: openModels.map(m => m.eci),
+        mode: 'markers',
+        type: 'scatter',
+        name: 'Open',
+        marker: { color: COLORS.open, size: 8, opacity: 0.6 },
+        text: openModels.map(m => m.display_name),
+    });
+
+    // Trend Lines and Stats
+    ['pre_mar_2024', 'post_mar_2024'].forEach((key, index) => {
+        const trend = trends[key];
+        if (trend) {
+            // Line trace
+            traces.push({
+                x: [trend.start_point.date, trend.end_point.date],
+                y: [trend.start_point.eci, trend.end_point.eci],
+                mode: 'lines',
+                type: 'scatter',
+                name: `${trend.name}`,
+                line: {
+                    width: 4,
+                    dash: key === 'post_mar_2024' ? 'solid' : 'dot',
+                    color: key === 'post_mar_2024' ? COLORS.open : COLORS.annotation
+                }
+            });
+
+            // Stats Annotation
+            // Position: Pre-2025 near end of line, Post-2025 near start/middle
+            const isPre = key === 'pre_mar_2024';
+            const xPos = isPre ? trend.end_point.date : trend.start_point.date;
+            const yPos = isPre ? trend.end_point.eci : trend.start_point.eci;
+
+            let statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ECI/year<br>${trend.percentage_growth_annualized}% per year`;
+
+            if (!isPre && trends['pre_mar_2024'] && trends['post_mar_2024']) {
+                const preRate = trends['pre_mar_2024'].absolute_growth_per_year;
+                const postRate = trends['post_mar_2024'].absolute_growth_per_year;
+                if (preRate > 0) {
+                    const factor = (postRate / preRate).toFixed(1);
+                    statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ECI/year<br>${factor}x faster than Pre-Mar 2024`;
+                }
+            }
+
+            const annotation = {
+                x: xPos,
+                y: yPos,
+                text: statsText,
+                showarrow: true,
+                arrowhead: 2,
+                ax: isPre ? -120 : 120, // Reduced offset for smaller box
+                ay: isPre ? -30 : 30,
+                bgcolor: 'rgba(255, 255, 255, 0.9)',
+                borderpad: 4,
+                bordercolor: COLORS.gridline,
+                borderwidth: 1,
+                align: 'left',
+                font: { size: 12, color: COLORS.text }
+            };
+
+            // Add to layout annotations if we had access to layout, but here we construct layout below.
+            // We can attach it to the traces array as a custom property or just create a separate array.
+            // Wait, we can't attach to traces. We need to add to layout.annotations.
+            // Let's modify the function structure slightly to accumulate annotations.
+
+            // Temporary storage on the trend object itself to retrieve later? 
+            // Better to change the loop structure. See below.
+            trend.annotation = annotation;
+        }
+    });
+
+    // Collect annotations
+    const annotations = [];
+    ['pre_mar_2024', 'post_mar_2024'].forEach(key => {
+        if (trends[key] && trends[key].annotation) {
+            annotations.push(trends[key].annotation);
+        }
+    });
+
+    const layout = {
+        title: { text: '', font: { size: 16 } },
+        margin: { l: 60, r: 60, t: 40, b: 60 },
+        height: 500,
+        xaxis: { title: 'Date' },
+        yaxis: { title: 'ECI' },
+        annotations: annotations,
+        hovermode: 'closest',
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: 'transparent',
+    };
+
+    // Attempt to reuse config if possible or redefine
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d'],
+        displaylogo: false,
+    };
+
+    Plotly.newPlot('trend-chart', traces, layout, config).then(function (gd) {
+        gd.on('plotly_restyle', function (data) {
+            // data typically contains the update object (e.g. {visible: ['legendonly']}) and indices
+            // But we can simpler just check the full state of the chart
+
+            const currentTraces = gd.data;
+            const newAnnotations = [...layout.annotations]; // Copy existing structure
+
+            // Map known trace names to annotation indices
+            // Based on our loop above: 
+            // - traces[0]: Closed
+            // - traces[1]: Open
+            // - traces[2]: Pre-Mar 2024
+            // - traces[3]: Post-Mar 2024
+
+            // And annotations array:
+            // - annotations[0]: Pre-Mar 2024
+            // - annotations[1]: Post-Mar 2024
+
+            // We need to dynamically find the trace index for each trend name
+            const preTrendTraceIndex = currentTraces.findIndex(t => t.name === trends['pre_mar_2024']?.name);
+            const postTrendTraceIndex = currentTraces.findIndex(t => t.name === trends['post_mar_2024']?.name);
+
+            // Find annotation indices (assuming order matches creation order if we are consistent)
+            // But better to check some property? Text content is unique enough or we rely on loop order.
+            // Loop order: pre_mar_2024 pushed first, then post_mar_2024.
+            const preAnnotationIndex = 0;
+            const postAnnotationIndex = 1;
+
+            if (preTrendTraceIndex !== -1 && trends['pre_mar_2024']) {
+                const isVisible = currentTraces[preTrendTraceIndex].visible !== 'legendonly';
+                if (newAnnotations[preAnnotationIndex]) newAnnotations[preAnnotationIndex].visible = isVisible;
+            }
+
+            if (postTrendTraceIndex !== -1 && trends['post_mar_2024']) {
+                const isVisible = currentTraces[postTrendTraceIndex].visible !== 'legendonly';
+                if (newAnnotations[postAnnotationIndex]) newAnnotations[postAnnotationIndex].visible = isVisible;
+            }
+
+            Plotly.relayout(gd, { annotations: newAnnotations });
+        });
+    });
 }
 
 /**
@@ -316,7 +483,7 @@ function renderTable(models) {
 
         row.innerHTML = `
             <td>${model.display_name}</td>
-            <td>${model.date}</td>
+            <td>${new Date(model.date).toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}</td>
             <td>${eciValue}</td>
             <td><span class=\"model-type ${typeClass}\">${typeLabel}</span></td>
             <td>${model.organization}</td>
