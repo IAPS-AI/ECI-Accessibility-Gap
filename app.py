@@ -222,8 +222,8 @@ def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
             if open_row["date"] <= closed_date:
                 continue
 
-            # Check if open model is >= closed model's ECI
-            if open_row["eci"] >= closed_eci:
+            # Check if open model is >= closed model's ECI (with 1 point tolerance)
+            if open_row["eci"] >= closed_eci - 1:
                 matching_open = open_row
                 match_type = "exact"
                 break
@@ -388,7 +388,7 @@ def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
             if pd.isna(row["eci"]) or pd.isna(row["date"]):
                 continue
                 
-            if row["eci"] >= cur_eci:
+            if row["eci"] >= cur_eci - 1:
                 cur_open_model = row
                 gap = (cur_open_model["date"] - cur_closed_model["date"]).days / 30.5
                 horizontal_gaps.append(gap)
