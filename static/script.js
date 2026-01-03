@@ -388,7 +388,7 @@ function renderChart(data) {
                 symbol: 'square',
             },
             hovertemplate: matchedGaps.map(g =>
-                `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)} (≥ ${g.closed_eci.toFixed(1)})<br>Date: %{x}<extra></extra>`
+                `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)} (≥ ${g.closed_eci.toFixed(1)} - 1)<br>Date: %{x}<extra></extra>`
             ),
         });
     }
