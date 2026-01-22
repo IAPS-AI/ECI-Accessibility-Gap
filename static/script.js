@@ -215,7 +215,119 @@ function showExplainer(stats, gaps) {
         explainerAvgGap.textContent = stats.avg_horizontal_gap_months.toFixed(1);
     }
 
+    // Render distribution chart if prior params are available
+    renderDistributionChart(estimate);
+
     explainer.classList.remove('hidden');
+}
+
+/**
+ * Render the log-normal distribution chart in the explainer panel
+ */
+function renderDistributionChart(estimate) {
+    const chartDiv = document.getElementById('distribution-chart');
+    if (!chartDiv || !estimate.prior_params) return;
+
+    const { mu, sigma, prior_mean_months } = estimate.prior_params;
+    const estimatedGap = estimate.estimated_current_gap;
+    const minBound = estimate.min_current_gap;
+
+    // Generate log-normal PDF points
+    const xMin = 0.1;
+    const xMax = 25;
+    const numPoints = 200;
+    const xVals = [];
+    const yVals = [];
+
+    for (let i = 0; i < numPoints; i++) {
+        const x = xMin + (xMax - xMin) * (i / (numPoints - 1));
+        // Log-normal PDF: (1/(x*sigma*sqrt(2*pi))) * exp(-(ln(x)-mu)^2 / (2*sigma^2))
+        const pdf = (1 / (x * sigma * Math.sqrt(2 * Math.PI))) *
+                    Math.exp(-Math.pow(Math.log(x) - mu, 2) / (2 * sigma * sigma));
+        xVals.push(x);
+        yVals.push(pdf);
+    }
+
+    const traces = [
+        // Distribution curve
+        {
+            x: xVals,
+            y: yVals,
+            type: 'scatter',
+            mode: 'lines',
+            fill: 'tozeroy',
+            fillcolor: 'rgba(92, 107, 192, 0.2)',
+            line: { color: COLORS.open, width: 2 },
+            name: 'Prior Distribution',
+            hoverinfo: 'skip',
+        },
+        // Prior mean marker
+        {
+            x: [prior_mean_months],
+            y: [0],
+            type: 'scatter',
+            mode: 'markers+text',
+            marker: { color: COLORS.annotation, size: 10, symbol: 'triangle-up' },
+            text: [`Prior Mean: ${prior_mean_months.toFixed(1)} mo`],
+            textposition: 'top center',
+            textfont: { size: 10, color: COLORS.annotation },
+            name: 'Prior Mean',
+            showlegend: false,
+        },
+        // Min bound marker
+        {
+            x: [minBound],
+            y: [0],
+            type: 'scatter',
+            mode: 'markers+text',
+            marker: { color: COLORS.closed, size: 10, symbol: 'triangle-up' },
+            text: [`Min: ${minBound.toFixed(1)} mo`],
+            textposition: 'top center',
+            textfont: { size: 10, color: COLORS.closed },
+            name: 'Minimum Bound',
+            showlegend: false,
+        },
+        // Estimated gap marker
+        {
+            x: [estimatedGap],
+            y: [0],
+            type: 'scatter',
+            mode: 'markers+text',
+            marker: { color: '#2e7d32', size: 12, symbol: 'star' },
+            text: [`Estimate: ${estimatedGap.toFixed(1)} mo`],
+            textposition: 'top center',
+            textfont: { size: 10, color: '#2e7d32' },
+            name: 'Estimated Gap',
+            showlegend: false,
+        },
+    ];
+
+    const layout = {
+        margin: { l: 40, r: 20, t: 10, b: 40 },
+        height: 200,
+        xaxis: {
+            title: 'Gap (Months)',
+            titlefont: { size: 11 },
+            tickfont: { size: 10 },
+            range: [0, 20],
+        },
+        yaxis: {
+            title: 'Density',
+            titlefont: { size: 11 },
+            tickfont: { size: 10 },
+            showticklabels: false,
+        },
+        showlegend: false,
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: 'transparent',
+    };
+
+    const config = {
+        responsive: true,
+        displayModeBar: false,
+    };
+
+    Plotly.newPlot('distribution-chart', traces, layout, config);
 }
 
 /**
@@ -526,7 +638,17 @@ function renderChart(data) {
                 size: 12,
                 symbol: 'circle',
             },
-            hovertemplate: '<b>%{text}</b><br>ECI: %{y:.1f}<br>Date: %{x}<extra></extra>',
+            error_y: {
+                type: 'data',
+                array: matchedClosed.map(m => m.eci_std || 0),
+                visible: true,
+                color: COLORS.closed,
+                thickness: 1.5,
+                width: 4,
+            },
+            hovertemplate: matchedClosed.map(m =>
+                `<b>${m.display_name || m.model}</b><br>ECI: ${m.eci.toFixed(1)} ± ${(m.eci_std || 0).toFixed(1)}<br>Date: %{x}<extra></extra>`
+            ),
             text: matchedClosed.map(m => m.display_name || m.model),
         });
     }
@@ -544,14 +666,15 @@ function renderChart(data) {
 
         const hoverTexts = unmatchedClosed.map(m => {
             const name = m.display_name || m.model;
+            const eciStr = `ECI: ${m.eci.toFixed(1)} ± ${(m.eci_std || 0).toFixed(1)}`;
             if (!hasCIData) {
-                return `<b>${name}</b><br>ECI: ${m.eci.toFixed(1)}<br>Date: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i>`;
+                return `<b>${name}</b><br>${eciStr}<br>Date: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i>`;
             }
             const releaseDate = new Date(m.date).getTime();
             const expectedLow = new Date(releaseDate + ciLowMs);
             const expectedHigh = new Date(releaseDate + ciHighMs);
             const formatDate = (d) => d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-            return `<b>${name}</b><br>ECI: ${m.eci.toFixed(1)}<br>Released: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i><br><br><b>Expected catch-up (90% CI):</b><br>${formatDate(expectedLow)} – ${formatDate(expectedHigh)}`;
+            return `<b>${name}</b><br>${eciStr}<br>Released: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i><br><br><b>Expected catch-up (90% CI):</b><br>${formatDate(expectedLow)} – ${formatDate(expectedHigh)}`;
         });
 
         traces.push({
@@ -566,6 +689,14 @@ function renderChart(data) {
                 symbol: 'circle-open',
                 line: { width: 2 },
             },
+            error_y: {
+                type: 'data',
+                array: unmatchedClosed.map(m => m.eci_std || 0),
+                visible: true,
+                color: COLORS.closedUnmatched,
+                thickness: 1.5,
+                width: 4,
+            },
             hovertemplate: hoverTexts.map(t => t + '<extra></extra>'),
             text: unmatchedClosed.map(m => m.display_name || m.model),
         });
@@ -576,9 +707,15 @@ function renderChart(data) {
     const matchedGaps = gaps.filter(g => g.matched);
 
     if (matchedGaps.length > 0) {
+        // Get open model std values from models array
+        const openModelStds = matchedGaps.map(g => {
+            const openModel = models.find(m => m.model === g.open_model);
+            return openModel?.eci_std || 0;
+        });
+
         traces.push({
             x: matchedGaps.map(g => g.open_date),
-            y: matchedGaps.map(g => g.closed_eci),
+            y: matchedGaps.map(g => g.open_eci),  // Use actual open model ECI
             mode: 'markers',
             type: 'scatter',
             name: labels.openModel,
@@ -587,8 +724,16 @@ function renderChart(data) {
                 size: 10,
                 symbol: 'square',
             },
-            hovertemplate: matchedGaps.map(g =>
-                `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)} (≥ ${g.closed_eci.toFixed(1)} - 1)<br>Date: %{x}<extra></extra>`
+            error_y: {
+                type: 'data',
+                array: openModelStds,
+                visible: true,
+                color: COLORS.open,
+                thickness: 1.5,
+                width: 4,
+            },
+            hovertemplate: matchedGaps.map((g, i) =>
+                `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)} ± ${openModelStds[i].toFixed(1)}<br>Date: %{x}<extra></extra>`
             ),
         });
     }
@@ -818,6 +963,27 @@ function renderHistoricalChart(data) {
         });
     }
 
+    // Add ±1 std dev band around the gap line
+    if (stats.std_horizontal_gap !== undefined) {
+        const stdDev = stats.std_horizontal_gap;
+        const upperBound = historicalGaps.map(g => Math.max(0, g.gap_months + stdDev));
+        const lowerBound = historicalGaps.map(g => Math.max(0, g.gap_months - stdDev));
+        const dates = historicalGaps.map(g => g.date);
+
+        // Create filled area for ±1 std dev
+        traces.push({
+            x: [...dates, ...dates.slice().reverse()],
+            y: [...upperBound, ...lowerBound.slice().reverse()],
+            fill: 'toself',
+            fillcolor: 'rgba(92, 107, 192, 0.15)',
+            line: { color: 'transparent' },
+            type: 'scatter',
+            name: `±1 Std Dev (${stdDev.toFixed(1)} mo)`,
+            hoverinfo: 'skip',
+            showlegend: true,
+        });
+    }
+
     // Main gap line
     traces.push({
         x: historicalGaps.map(g => g.date),
@@ -828,7 +994,7 @@ function renderHistoricalChart(data) {
         line: { color: COLORS.open, width: 2 },
         marker: { color: COLORS.open, size: 6 },
         hovertemplate: historicalGaps.map(g =>
-            `<b>%{x|%b %Y}</b><br>Gap: ${g.gap_months} mo<br>` +
+            `<b>%{x|%b %Y}</b><br>Gap: ${g.gap_months} mo ± ${(stats.std_horizontal_gap || 0).toFixed(1)}<br>` +
             `${labels.openModel} frontier: ${g.open_frontier_model || 'N/A'}<br>` +
             `${labels.closedModel} frontier: ${g.reference_model || 'N/A'}<extra></extra>`
         ),
