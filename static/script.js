@@ -648,17 +648,7 @@ function renderChart(data) {
                 size: 12,
                 symbol: 'circle',
             },
-            error_y: {
-                type: 'data',
-                array: matchedClosed.map(m => m.eci_std || 0),
-                visible: true,
-                color: COLORS.closed,
-                thickness: 1.5,
-                width: 4,
-            },
-            hovertemplate: matchedClosed.map(m =>
-                `<b>${m.display_name || m.model}</b><br>ECI: ${m.eci.toFixed(1)} ± ${(m.eci_std || 0).toFixed(1)}<br>Date: %{x}<extra></extra>`
-            ),
+            hovertemplate: '<b>%{text}</b><br>ECI: %{y:.1f}<br>Date: %{x}<extra></extra>',
             text: matchedClosed.map(m => m.display_name || m.model),
         });
     }
@@ -676,15 +666,14 @@ function renderChart(data) {
 
         const hoverTexts = unmatchedClosed.map(m => {
             const name = m.display_name || m.model;
-            const eciStr = `ECI: ${m.eci.toFixed(1)} ± ${(m.eci_std || 0).toFixed(1)}`;
             if (!hasCIData) {
-                return `<b>${name}</b><br>${eciStr}<br>Date: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i>`;
+                return `<b>${name}</b><br>ECI: ${m.eci.toFixed(1)}<br>Date: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i>`;
             }
             const releaseDate = new Date(m.date).getTime();
             const expectedLow = new Date(releaseDate + ciLowMs);
             const expectedHigh = new Date(releaseDate + ciHighMs);
             const formatDate = (d) => d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-            return `<b>${name}</b><br>${eciStr}<br>Released: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i><br><br><b>Expected catch-up (90% CI):</b><br>${formatDate(expectedLow)} – ${formatDate(expectedHigh)}`;
+            return `<b>${name}</b><br>ECI: ${m.eci.toFixed(1)}<br>Released: ${new Date(m.date).toLocaleDateString()}<br><i>Not yet matched</i><br><br><b>Expected catch-up (90% CI):</b><br>${formatDate(expectedLow)} – ${formatDate(expectedHigh)}`;
         });
 
         traces.push({
@@ -699,14 +688,6 @@ function renderChart(data) {
                 symbol: 'circle-open',
                 line: { width: 2 },
             },
-            error_y: {
-                type: 'data',
-                array: unmatchedClosed.map(m => m.eci_std || 0),
-                visible: true,
-                color: COLORS.closedUnmatched,
-                thickness: 1.5,
-                width: 4,
-            },
             hovertemplate: hoverTexts.map(t => t + '<extra></extra>'),
             text: unmatchedClosed.map(m => m.display_name || m.model),
         });
@@ -717,15 +698,9 @@ function renderChart(data) {
     const matchedGaps = gaps.filter(g => g.matched);
 
     if (matchedGaps.length > 0) {
-        // Get open model std values from models array
-        const openModelStds = matchedGaps.map(g => {
-            const openModel = models.find(m => m.model === g.open_model);
-            return openModel?.eci_std || 0;
-        });
-
         traces.push({
             x: matchedGaps.map(g => g.open_date),
-            y: matchedGaps.map(g => g.open_eci),  // Use actual open model ECI
+            y: matchedGaps.map(g => g.open_eci),
             mode: 'markers',
             type: 'scatter',
             name: labels.openModel,
@@ -734,16 +709,8 @@ function renderChart(data) {
                 size: 10,
                 symbol: 'square',
             },
-            error_y: {
-                type: 'data',
-                array: openModelStds,
-                visible: true,
-                color: COLORS.open,
-                thickness: 1.5,
-                width: 4,
-            },
-            hovertemplate: matchedGaps.map((g, i) =>
-                `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)} ± ${openModelStds[i].toFixed(1)}<br>Date: %{x}<extra></extra>`
+            hovertemplate: matchedGaps.map(g =>
+                `<b>${g.open_model}</b><br>ECI: ${g.open_eci.toFixed(1)}<br>Date: %{x}<extra></extra>`
             ),
         });
     }
