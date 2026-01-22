@@ -428,9 +428,9 @@ def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
             },
         }
 
-    # Use max of minimums to only measure gaps in ECI range where BOTH categories have models.
-    # Earlier/lower ECI levels often only have one category represented, so measuring gaps
-    # there isn't meaningful. We start from the point where both open and closed models exist.
+    # Use max of minimums to start from the ECI level where reference models first appear.
+    # E.g., if open models start at ECI 109 but closed models start at ECI 126, we begin
+    # sampling at 126 - below that there are no closed models to "catch up to".
     start_eci = max(df_open["eci"].min(), df_closed["eci"].min())
     end_eci = max(df_open["eci"].max(), df_closed["eci"].max())
 
