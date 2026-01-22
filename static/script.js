@@ -498,7 +498,7 @@ function renderTrendChart(data) {
  * Style: Only show closed models and the specific open models that matched them
  */
 function renderChart(data) {
-    const { models, gaps } = data;
+    const { models, gaps, statistics } = data;
     const labels = getFramingLabels();
 
     // Create traces
@@ -552,6 +552,44 @@ function renderChart(data) {
             hovertemplate: '<b>%{text}</b><br>ECI: %{y:.1f}<br>Date: %{x}<br><i>Not yet matched</i><extra></extra>',
             text: unmatchedClosed.map(m => m.display_name || m.model),
         });
+
+        // Add projected catch-up zones for unmatched models based on 90% CI
+        if (statistics && statistics.ci_90_low !== undefined && statistics.ci_90_high !== undefined) {
+            const ciLowMs = statistics.ci_90_low * 30.5 * 24 * 60 * 60 * 1000; // months to ms
+            const ciHighMs = statistics.ci_90_high * 30.5 * 24 * 60 * 60 * 1000;
+
+            unmatchedClosed.forEach(m => {
+                const releaseDate = new Date(m.date).getTime();
+                const expectedLow = new Date(releaseDate + ciLowMs).toISOString();
+                const expectedHigh = new Date(releaseDate + ciHighMs).toISOString();
+
+                // Add shaded rectangle showing expected catch-up window
+                shapes.push({
+                    type: 'rect',
+                    x0: expectedLow,
+                    x1: expectedHigh,
+                    y0: m.eci - 1.5,
+                    y1: m.eci + 1.5,
+                    fillcolor: 'rgba(92, 107, 192, 0.15)',
+                    line: { color: 'rgba(92, 107, 192, 0.4)', width: 1, dash: 'dot' },
+                });
+            });
+
+            // Add a single trace for the legend entry
+            traces.push({
+                x: [null],
+                y: [null],
+                mode: 'markers',
+                type: 'scatter',
+                name: `Expected catch-up (90% CI)`,
+                marker: {
+                    color: 'rgba(92, 107, 192, 0.3)',
+                    size: 15,
+                    symbol: 'square',
+                },
+                showlegend: true,
+            });
+        }
     }
 
     // Only show open models that matched a closed model (blue squares)
