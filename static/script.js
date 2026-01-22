@@ -176,6 +176,12 @@ function showExplainer(stats, gaps) {
         minBound.textContent = estimate.min_current_gap || '--';
     }
 
+    // Set the average gap value in the explainer text
+    const explainerAvgGap = document.getElementById('explainer-avg-gap');
+    if (explainerAvgGap && stats.avg_horizontal_gap_months !== undefined) {
+        explainerAvgGap.textContent = stats.avg_horizontal_gap_months.toFixed(1);
+    }
+
     explainer.classList.remove('hidden');
 }
 
