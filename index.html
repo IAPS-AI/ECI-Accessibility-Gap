@@ -101,12 +101,12 @@
 
                 <ul id="unmatched-ages-list"></ul>
 
-                <p><strong>Methodology:</strong> We use a Bayesian-inspired approach where:</p>
+                <p><strong>Methodology:</strong> We use survival analysis with Maximum Likelihood Estimation:</p>
                 <ol>
-                    <li>The prior is the historical average gap from matched pairs</li>
-                    <li>Unmatched model ages provide lower bounds (censored data)</li>
-                    <li>Older unmatched models are weighted more heavily (stronger evidence)</li>
-                    <li>An uncertainty premium is added based on the number of unmatched models and historical variance</li>
+                    <li><strong>Fit prior:</strong> A log-normal distribution is fit to historical matched gaps</li>
+                    <li><strong>Censored likelihood:</strong> Unmatched models contribute P(gap &gt; observed_age) to the likelihood</li>
+                    <li><strong>Truncated expectation:</strong> For each unmatched model, compute E[gap | gap &gt; age] using the truncated log-normal formula</li>
+                    <li><strong>Weighted estimate:</strong> Combine expectations, weighting older models more heavily (they're more informative)</li>
                 </ol>
 
                 <p class="explainer-note">

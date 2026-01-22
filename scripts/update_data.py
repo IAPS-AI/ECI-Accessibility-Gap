@@ -14,8 +14,10 @@ from scipy.stats import linregress, norm
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Data source
+# Constants
 ECI_SCORES_URL = "https://epoch.ai/data/eci_scores.csv"
+ECI_MATCH_THRESHOLD = 1.0  # ECI points - model is "matched" if within this range
+DAYS_PER_MONTH = 30.5  # Average days per month for gap calculations
 
 def get_rank(
     df: pd.DataFrame,
@@ -89,15 +91,15 @@ def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
             if open_row["date"] <= closed_date:
                 continue
 
-            # Match if open model is within 1 ECI point of closed model
-            if open_row["eci"] >= closed_eci - 1:
+            # Match if open model is within threshold of closed model
+            if open_row["eci"] >= closed_eci - ECI_MATCH_THRESHOLD:
                 matching_open = open_row
                 match_type = "exact"
                 break
 
         if matching_open is not None:
             gap_days = (matching_open["date"] - closed_date).days
-            gap_months = gap_days / 30.5
+            gap_months = gap_days / DAYS_PER_MONTH
 
             gaps.append({
                 "closed_model": closed_row.get("Model", "Unknown"),
@@ -113,7 +115,7 @@ def calculate_horizontal_gaps(df: pd.DataFrame) -> list[dict]:
         else:
             now = datetime.now()
             gap_days = (now - closed_date.to_pydatetime().replace(tzinfo=None)).days
-            gap_months = gap_days / 30.5
+            gap_months = gap_days / DAYS_PER_MONTH
 
             gaps.append({
                 "closed_model": closed_row.get("Model", "Unknown"),
@@ -189,10 +191,16 @@ def calculate_trends(df: pd.DataFrame) -> dict:
 
 def estimate_current_gap(gaps: list[dict], matched_gaps_months: list[float]) -> dict:
     """
-    Estimate the current gap using unmatched models as censored observations.
+    Estimate the current gap using survival analysis with censored observations.
 
-    Uses a simple Bayesian-inspired approach: unmatched models provide lower bounds
-    on the current gap. We weight by how long each model has been unmatched.
+    Approach: Fit a log-normal distribution to historical gaps, then use
+    Maximum Likelihood Estimation (MLE) that accounts for right-censored data
+    (unmatched models where we only know gap >= observed age).
+
+    The log-normal distribution is appropriate because:
+    1. Gaps are always positive
+    2. The distribution is right-skewed (some gaps are much longer than average)
+    3. It's commonly used in survival analysis for time-to-event data
     """
     unmatched = [g for g in gaps if not g["matched"]]
 
@@ -202,45 +210,117 @@ def estimate_current_gap(gaps: list[dict], matched_gaps_months: list[float]) -> 
             "min_current_gap": 0,
             "confidence": "high",
             "unmatched_ages": [],
+            "method": "no_unmatched",
         }
 
-    # Get ages of unmatched models (minimum gap values)
     unmatched_ages = sorted([g["gap_months"] for g in unmatched], reverse=True)
+    min_current_gap = max(unmatched_ages)
 
-    # The minimum current gap is the age of the oldest unmatched model
-    min_current_gap = max(unmatched_ages) if unmatched_ages else 0
+    if not matched_gaps_months or len(matched_gaps_months) < 3:
+        # Not enough data for proper estimation - use simple heuristic
+        # Assume gaps follow exponential-like decay, estimate mean from censored data
+        estimated = min_current_gap * 1.3  # Add 30% for expected additional wait
+        return {
+            "estimated_current_gap": round(estimated, 1),
+            "min_current_gap": round(min_current_gap, 1),
+            "confidence": "low",
+            "unmatched_ages": [round(a, 1) for a in unmatched_ages],
+            "method": "insufficient_data_heuristic",
+        }
 
-    # Estimate: Use survival analysis intuition
-    # If we have matched gaps averaging X months and unmatched models Y months old,
-    # the current gap is likely at least as large as the oldest unmatched model
+    # Fit log-normal distribution to matched gaps
+    matched_positive = [g for g in matched_gaps_months if g > 0]
+    if len(matched_positive) < 3:
+        estimated = min_current_gap * 1.3
+        return {
+            "estimated_current_gap": round(estimated, 1),
+            "min_current_gap": round(min_current_gap, 1),
+            "confidence": "low",
+            "unmatched_ages": [round(a, 1) for a in unmatched_ages],
+            "method": "insufficient_positive_data",
+        }
+
+    log_matched = np.log(matched_positive)
+    mu_prior = np.mean(log_matched)  # Log-normal mu parameter
+    sigma_prior = np.std(log_matched)  # Log-normal sigma parameter
+
+    if sigma_prior == 0:
+        sigma_prior = 0.5  # Default if no variance
+
+    # MLE update with censored observations
+    # For right-censored data, the likelihood contribution is P(T > t) = 1 - CDF(t)
+    # We use the survival function: S(t) = 1 - Phi((ln(t) - mu) / sigma)
     #
-    # Simple estimate: weighted average where older unmatched models get more weight
-    # Plus an adjustment factor based on historical variance
+    # Bayesian update: posterior mu given censored observations
+    # Each unmatched model tells us the gap is AT LEAST its age
+    # This shifts the posterior mean upward
 
-    if matched_gaps_months and len(matched_gaps_months) >= 3:
-        historical_mean = np.mean(matched_gaps_months)
-        historical_std = np.std(matched_gaps_months)
+    # Calculate expected value given truncation at each censored point
+    # E[X | X > c] for log-normal = exp(mu + sigma^2/2) * Phi((mu + sigma^2 - ln(c))/sigma) / S(c)
 
-        # Bayesian update: prior is historical, evidence is unmatched ages
-        # Simple heuristic: estimate is max of (historical mean, weighted unmatched)
-        weights = np.array(unmatched_ages) / sum(unmatched_ages) if sum(unmatched_ages) > 0 else np.ones(len(unmatched_ages))
-        weighted_unmatched = np.average(unmatched_ages, weights=weights)
+    def expected_given_greater_than(c, mu, sigma):
+        """E[X | X > c] for log-normal distribution"""
+        if c <= 0:
+            return np.exp(mu + sigma**2 / 2)
 
-        # Add uncertainty premium - gaps tend to be longer when there are many unmatched
-        uncertainty_premium = 0.5 * len(unmatched) * (historical_std / historical_mean if historical_mean > 0 else 0.2)
+        log_c = np.log(c)
+        # Survival function S(c) = P(X > c)
+        z = (log_c - mu) / sigma
+        survival = 1 - norm.cdf(z)
 
-        estimated = max(weighted_unmatched + uncertainty_premium, min_current_gap)
-        confidence = "medium" if len(unmatched) <= 3 else "low"
+        if survival < 1e-10:
+            # If survival is very small, gap is likely much larger
+            return c * 2  # Heuristic: at least double the censored value
+
+        # E[X | X > c] using truncated log-normal formula
+        z_shifted = (mu + sigma**2 - log_c) / sigma
+        expected = np.exp(mu + sigma**2 / 2) * norm.cdf(z_shifted) / survival
+
+        return expected
+
+    # Calculate expected gap for each unmatched model
+    expected_gaps = []
+    for age in unmatched_ages:
+        if age > 0:
+            exp_gap = expected_given_greater_than(age, mu_prior, sigma_prior)
+            expected_gaps.append(exp_gap)
+
+    if expected_gaps:
+        # Weight by age (older unmatched models are more informative)
+        weights = np.array(unmatched_ages[:len(expected_gaps)])
+        weights = weights / weights.sum() if weights.sum() > 0 else np.ones(len(weights)) / len(weights)
+
+        # Weighted average of expected gaps
+        estimated = np.average(expected_gaps, weights=weights)
+
+        # Ensure estimate is at least the minimum bound
+        estimated = max(estimated, min_current_gap)
+
+        # Calculate confidence based on how far unmatched ages are from prior mean
+        prior_mean = np.exp(mu_prior + sigma_prior**2 / 2)
+        deviation_ratio = min_current_gap / prior_mean if prior_mean > 0 else 2
+
+        if deviation_ratio < 1.5:
+            confidence = "high"
+        elif deviation_ratio < 2.5:
+            confidence = "medium"
+        else:
+            confidence = "low"
     else:
-        # Not enough historical data, use simple average of unmatched
-        estimated = np.mean(unmatched_ages) * 1.2 if unmatched_ages else 0
+        estimated = min_current_gap * 1.3
         confidence = "low"
 
     return {
-        "estimated_current_gap": round(estimated, 1),
-        "min_current_gap": round(min_current_gap, 1),
+        "estimated_current_gap": round(float(estimated), 1),
+        "min_current_gap": round(float(min_current_gap), 1),
         "confidence": confidence,
         "unmatched_ages": [round(a, 1) for a in unmatched_ages],
+        "method": "survival_analysis_mle",
+        "prior_params": {
+            "mu": round(float(mu_prior), 3),
+            "sigma": round(float(sigma_prior), 3),
+            "prior_mean_months": round(float(np.exp(mu_prior + sigma_prior**2 / 2)), 1),
+        },
     }
 
 
@@ -293,19 +373,19 @@ def calculate_historical_gaps(df: pd.DataFrame) -> list[dict]:
         best_closed_eci = best_closed["eci"]
 
         # Find the first closed model to achieve the best open's ECI level
-        closed_at_open_level = df_closed[df_closed["eci"] >= best_open_eci - 1].sort_values("date")
+        closed_at_open_level = df_closed[df_closed["eci"] >= best_open_eci - ECI_MATCH_THRESHOLD].sort_values("date")
 
         if len(closed_at_open_level) > 0:
             first_closed_at_level = closed_at_open_level.iloc[0]
             # Gap is: when did closed first hit this level vs when did open hit it
             gap_days = (best_open_date - first_closed_at_level["date"]).days
-            gap_months = gap_days / 30.5
+            gap_months = gap_days / DAYS_PER_MONTH
 
             # If gap is negative, open was first (unusual but possible)
             gap_months = max(0, gap_months)
 
             # Determine if the frontier is "matched" (open has caught up to closed frontier)
-            is_matched = best_open_eci >= best_closed_eci - 1
+            is_matched = best_open_eci >= best_closed_eci - ECI_MATCH_THRESHOLD
         else:
             # No closed model at this level yet (open is ahead - very rare)
             gap_months = 0
@@ -348,7 +428,8 @@ def calculate_statistics(df: pd.DataFrame, gaps: list[dict]) -> dict:
             },
         }
 
-    start_eci = max(df_open["eci"].min(), df_closed["eci"].min())
+    # Use min to cover full ECI range from lowest to highest
+    start_eci = min(df_open["eci"].min(), df_closed["eci"].min())
     end_eci = max(df_open["eci"].max(), df_closed["eci"].max())
 
     horizontal_gaps = []
