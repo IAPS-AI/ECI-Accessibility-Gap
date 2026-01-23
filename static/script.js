@@ -543,18 +543,25 @@ function renderAll() {
 }
 
 /**
- * Render the trend chart showing pre/post 2025 regression lines
+ * Render the trend chart with dynamic trend lines based on benchmark data
  */
 function renderTrendChart(data) {
-    const trends = data.trends;
-    const models = data.trend_models || data.models; // Fallback only if backend not updated immediately
+    const trends = data.trends || {};
+    const models = data.trend_models || data.models;
     const traces = [];
+    const annotations = [];
     const scoreField = getScoreField();
+    const trendMeta = trends.metadata || {};
 
-    // All models scatter - use score or eci depending on benchmark
+    if (!models || models.length === 0) {
+        document.getElementById('trend-chart').innerHTML =
+            '<p style="text-align: center; color: #6b7280; padding: 2rem;">No trend data available.</p>';
+        return;
+    }
+
+    // All models scatter
     const closedModels = models.filter(m => !m.is_open && m.date && (m[scoreField] || m.eci || m.score));
     const openModels = models.filter(m => m.is_open && m.date && (m[scoreField] || m.eci || m.score));
-
     const getScore = (m) => m[scoreField] ?? m.eci ?? m.score;
 
     traces.push({
@@ -577,77 +584,124 @@ function renderTrendChart(data) {
         text: openModels.map(m => m.display_name),
     });
 
-    // Trend Lines and Stats
-    ['pre_apr_2024', 'post_apr_2024'].forEach((key, index) => {
-        const trend = trends[key];
-        if (trend) {
-            // Line trace
-            traces.push({
-                x: [trend.start_point.date, trend.end_point.date],
-                y: [trend.start_point.eci, trend.end_point.eci],
-                mode: 'lines',
-                type: 'scatter',
-                name: `${trend.name}`,
-                line: {
-                    width: 4,
-                    dash: key === 'post_apr_2024' ? 'solid' : 'dot',
-                    color: key === 'post_apr_2024' ? COLORS.open : COLORS.annotation
-                }
-            });
+    const benchmarkMetadata = getBenchmarkMetadata();
+    const unitName = appState.currentBenchmark === 'eci' ? 'ECI points' : (benchmarkMetadata?.unit || 'points');
 
-            // Stats Annotation
-            // Position: Pre-2025 near end of line, Post-2025 near start/middle
-            const isPre = key === 'pre_apr_2024';
-            const xPos = isPre ? trend.end_point.date : trend.start_point.date;
-            const yPos = isPre ? trend.end_point.eci : trend.start_point.eci;
+    // Determine which trend keys to use from metadata
+    let earlyKey = null;
+    let recentKey = null;
 
-            const metadata = getBenchmarkMetadata();
-            const unitName = appState.currentBenchmark === 'eci' ? 'ECI points' : (metadata?.unit || 'points');
-            let statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ${unitName}/year`;
+    if (trendMeta.has_split) {
+        earlyKey = trendMeta.early_key;
+        recentKey = trendMeta.recent_key;
+    }
 
-            if (!isPre && trends['pre_apr_2024'] && trends['post_apr_2024']) {
-                const preRate = trends['pre_apr_2024'].absolute_growth_per_year;
-                const postRate = trends['post_apr_2024'].absolute_growth_per_year;
-                if (preRate > 0) {
-                    const factor = (postRate / preRate).toFixed(1);
-                    statsText = `<b>${trend.name} Growth</b><br>+${trend.absolute_growth_per_year} ${unitName}/year<br>${factor}x faster than Pre-Apr 2024`;
-                }
-            }
+    // Add trend lines if we have a split
+    if (earlyKey && recentKey && trends[earlyKey] && trends[recentKey]) {
+        const earlyTrend = trends[earlyKey];
+        const recentTrend = trends[recentKey];
 
-            const annotation = {
-                x: xPos,
-                y: yPos,
-                text: statsText,
-                showarrow: true,
-                arrowhead: 2,
-                ax: isPre ? -120 : 120, // Reduced offset for smaller box
-                ay: isPre ? -30 : 30,
-                bgcolor: 'rgba(255, 255, 255, 0.9)',
-                borderpad: 4,
-                bordercolor: COLORS.gridline,
-                borderwidth: 1,
-                align: 'left',
-                font: { size: 12, color: COLORS.text }
-            };
+        // Early trend line (dotted)
+        traces.push({
+            x: [earlyTrend.start_point.date, earlyTrend.end_point.date],
+            y: [earlyTrend.start_point.eci, earlyTrend.end_point.eci],
+            mode: 'lines',
+            type: 'scatter',
+            name: earlyTrend.name,
+            line: { width: 4, dash: 'dot', color: COLORS.annotation }
+        });
 
-            // Add to layout annotations if we had access to layout, but here we construct layout below.
-            // We can attach it to the traces array as a custom property or just create a separate array.
-            // Wait, we can't attach to traces. We need to add to layout.annotations.
-            // Let's modify the function structure slightly to accumulate annotations.
+        // Recent trend line (solid)
+        traces.push({
+            x: [recentTrend.start_point.date, recentTrend.end_point.date],
+            y: [recentTrend.start_point.eci, recentTrend.end_point.eci],
+            mode: 'lines',
+            type: 'scatter',
+            name: recentTrend.name,
+            line: { width: 4, dash: 'solid', color: COLORS.open }
+        });
 
-            // Temporary storage on the trend object itself to retrieve later? 
-            // Better to change the loop structure. See below.
-            trend.annotation = annotation;
+        // Early trend annotation
+        annotations.push({
+            x: earlyTrend.end_point.date,
+            y: earlyTrend.end_point.eci,
+            text: `<b>${earlyTrend.name} Growth</b><br>+${earlyTrend.absolute_growth_per_year} ${unitName}/year`,
+            showarrow: true,
+            arrowhead: 2,
+            ax: -120,
+            ay: -30,
+            bgcolor: 'rgba(255, 255, 255, 0.9)',
+            borderpad: 4,
+            bordercolor: COLORS.gridline,
+            borderwidth: 1,
+            align: 'left',
+            font: { size: 12, color: COLORS.text }
+        });
+
+        // Recent trend annotation with comparison
+        let recentText = `<b>${recentTrend.name} Growth</b><br>+${recentTrend.absolute_growth_per_year} ${unitName}/year`;
+        if (earlyTrend.absolute_growth_per_year > 0) {
+            const factor = (recentTrend.absolute_growth_per_year / earlyTrend.absolute_growth_per_year).toFixed(1);
+            recentText += `<br>${factor}x faster than ${earlyTrend.name}`;
         }
-    });
 
-    // Collect annotations
-    const annotations = [];
-    ['pre_apr_2024', 'post_apr_2024'].forEach(key => {
-        if (trends[key] && trends[key].annotation) {
-            annotations.push(trends[key].annotation);
+        annotations.push({
+            x: recentTrend.start_point.date,
+            y: recentTrend.start_point.eci,
+            text: recentText,
+            showarrow: true,
+            arrowhead: 2,
+            ax: 120,
+            ay: 30,
+            bgcolor: 'rgba(255, 255, 255, 0.9)',
+            borderpad: 4,
+            bordercolor: COLORS.gridline,
+            borderwidth: 1,
+            align: 'left',
+            font: { size: 12, color: COLORS.text }
+        });
+    } else if (trends.overall) {
+        // Just show overall trend line if no split
+        const overallTrend = trends.overall;
+        traces.push({
+            x: [overallTrend.start_point.date, overallTrend.end_point.date],
+            y: [overallTrend.start_point.eci, overallTrend.end_point.eci],
+            mode: 'lines',
+            type: 'scatter',
+            name: 'Overall Trend',
+            line: { width: 4, dash: 'solid', color: COLORS.open }
+        });
+
+        annotations.push({
+            x: overallTrend.end_point.date,
+            y: overallTrend.end_point.eci,
+            text: `<b>Overall Growth</b><br>+${overallTrend.absolute_growth_per_year} ${unitName}/year`,
+            showarrow: true,
+            arrowhead: 2,
+            ax: -80,
+            ay: -40,
+            bgcolor: 'rgba(255, 255, 255, 0.9)',
+            borderpad: 4,
+            bordercolor: COLORS.gridline,
+            borderwidth: 1,
+            align: 'left',
+            font: { size: 12, color: COLORS.text }
+        });
+    }
+
+    // Update trend chart title based on available data
+    const trendTitle = document.getElementById('trend-title');
+    const trendSubtitle = document.getElementById('trend-subtitle');
+    if (trendTitle && trendSubtitle) {
+        const scoreLabel = appState.currentBenchmark === 'eci' ? 'ECI' : 'Score';
+        if (trendMeta.has_split && trendMeta.split_label) {
+            trendTitle.textContent = `${scoreLabel} Growth Trends (Pre vs Post ${trendMeta.split_label})`;
+            trendSubtitle.textContent = `Comparing the rate of ${scoreLabel.toLowerCase()} increases before and after ${trendMeta.split_label}.`;
+        } else {
+            trendTitle.textContent = `${scoreLabel} Growth Trend`;
+            trendSubtitle.textContent = `Overall ${scoreLabel.toLowerCase()} growth rate for this benchmark.`;
         }
-    });
+    }
 
     // Add "current date" vertical line logic
     const today = new Date().toISOString().split('T')[0];
