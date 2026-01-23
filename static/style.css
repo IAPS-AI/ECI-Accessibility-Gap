@@ -307,26 +307,53 @@ body {
 
 /* Explainer Panel */
 .explainer-panel {
-    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
     border: 1px solid #f59e0b;
     border-radius: var(--radius-md);
-    padding: var(--spacing-lg);
     margin-bottom: var(--spacing-xl);
     font-size: 0.9rem;
     line-height: 1.6;
+    overflow: hidden;
 }
 
 .explainer-panel.hidden {
     display: none;
 }
 
-.explainer-header {
+.explainer-content {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    padding: var(--spacing-md) var(--spacing-lg);
+}
+
+.explainer-summary {
+    padding: var(--spacing-md);
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    cursor: pointer;
+    font-weight: 600;
+    color: #92400e;
+    font-size: 1rem;
+    list-style: none;
+    user-select: none;
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
-    margin-bottom: var(--spacing-md);
-    color: #92400e;
-    font-size: 1rem;
+}
+
+.explainer-summary::-webkit-details-marker {
+    display: none;
+}
+
+.explainer-summary::before {
+    content: '▶';
+    font-size: 0.75rem;
+    transition: transform 0.2s ease;
+}
+
+details.explainer-panel[open] .explainer-summary::before {
+    transform: rotate(90deg);
+}
+
+.explainer-summary:hover {
+    background: linear-gradient(135deg, #fde68a 0%, #fcd34d 100%);
 }
 
 .explainer-content p {

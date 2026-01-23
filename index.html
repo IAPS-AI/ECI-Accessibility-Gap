@@ -99,10 +99,8 @@
             </div>
         </div>
 
-        <div id="current-gap-explainer" class="explainer-panel hidden">
-            <div class="explainer-header">
-                <strong>How is the current gap estimated?</strong>
-            </div>
+        <details id="current-gap-explainer" class="explainer-panel hidden">
+            <summary class="explainer-summary">How is the current gap estimated?</summary>
             <div class="explainer-content">
                 <p>The <strong>average gap</strong> (<span id="explainer-avg-gap">--</span> months) is based on historical matched pairs, but this may underestimate the <em>current</em> gap because it doesn't fully account for models that haven't been matched yet.</p>
 
@@ -127,7 +125,7 @@
                     <div id="distribution-chart" style="width: 100%; height: 200px;"></div>
                 </div>
             </div>
-        </div>
+        </details>
 
         <div class="header">
             <h1>Gap Over Time</h1>
@@ -171,6 +169,6 @@
         </footer>
     </div>
 
-    <script src="static/script.js?v=4"></script>
+    <script src="static/script.js?v=5"></script>
 </body>
 </html>

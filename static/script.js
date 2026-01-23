@@ -430,10 +430,20 @@ function showExplainer(stats, gaps) {
 
     explainer.classList.remove('hidden');
 
-    // Render distribution chart after panel is visible (Plotly needs visible container)
-    requestAnimationFrame(() => {
-        renderDistributionChart(estimate);
-    });
+    // Store estimate for later rendering when details is opened
+    explainer._currentEstimate = estimate;
+
+    // Add toggle listener to render chart when opened (Plotly needs visible container)
+    if (!explainer._hasToggleListener) {
+        explainer.addEventListener('toggle', function() {
+            if (this.open && this._currentEstimate) {
+                requestAnimationFrame(() => {
+                    renderDistributionChart(this._currentEstimate);
+                });
+            }
+        });
+        explainer._hasToggleListener = true;
+    }
 }
 
 /**
