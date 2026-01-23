@@ -155,12 +155,17 @@ def calculate_horizontal_gaps(
 
     return gaps
 
-def calculate_trends(df: pd.DataFrame, score_col: str = "eci") -> dict:
+def calculate_trends(df: pd.DataFrame, score_col: str = "eci", use_apr_2024_split: bool = False) -> dict:
     """
     Calculate trends dynamically based on the data's date range.
 
     For datasets spanning > 1 year, splits at the midpoint to show early vs recent trends.
     For shorter datasets, shows only the overall trend.
+
+    Args:
+        df: DataFrame with 'date' and score columns
+        score_col: Name of the score column
+        use_apr_2024_split: If True, use April 2024 as split point (for ECI specifically)
     """
     trends = {}
 
@@ -262,8 +267,8 @@ def calculate_trends(df: pd.DataFrame, score_col: str = "eci") -> dict:
     else:
         trends["metadata"] = {"has_split": False}
 
-    # For backwards compatibility with ECI, also include pre/post Apr 2024 if applicable
-    if date_range_days > 365:
+    # For ECI specifically, use April 2024 as the split point (meaningful for AI progress)
+    if use_apr_2024_split and date_range_days > 365:
         apr_2024 = pd.Timestamp("2024-04-01")
         if min_date < apr_2024 < max_date:
             pre_apr = df[df["date"] < apr_2024]
@@ -271,6 +276,14 @@ def calculate_trends(df: pd.DataFrame, score_col: str = "eci") -> dict:
             if len(pre_apr) >= 2 and len(post_apr) >= 2:
                 trends["pre_apr_2024"] = get_stats(pre_apr, "Pre-Apr 2024")
                 trends["post_apr_2024"] = get_stats(post_apr, "Post-Apr 2024")
+                # Override the dynamic split with April 2024 for ECI
+                trends["metadata"] = {
+                    "has_split": True,
+                    "split_date": apr_2024.isoformat(),
+                    "split_label": "Apr 2024",
+                    "early_key": "pre_apr_2024",
+                    "recent_key": "post_apr_2024"
+                }
 
     return trends
 
@@ -688,7 +701,7 @@ def process_data() -> dict[str, Any]:
         gap["open_eci"] = gap.pop("open_score")
 
     stats = calculate_statistics(df_frontier, gaps, score_col="eci")
-    trends = calculate_trends(df_all_valid)
+    trends = calculate_trends(df_all_valid, use_apr_2024_split=True)  # ECI uses April 2024 split
 
     # Calculate historical gaps for the timeline chart
     historical_gaps = calculate_historical_gaps(df_frontier, score_col="eci", threshold=ECI_MATCH_THRESHOLD, model_col="Model")
