@@ -13,7 +13,48 @@ const COLORS = {
     connector: '#5c6bc0',
     annotation: '#6b7280',
     gridline: '#e5e7eb',
+    china: '#e53935',  // Red for China
+    us: '#5c6bc0',     // Blue for US/other
 };
+
+/**
+ * Simple linear regression calculation
+ * Returns slope (per year), intercept, and helper to predict values
+ */
+function linearRegression(dates, scores) {
+    if (dates.length < 2) return null;
+
+    // Convert dates to numeric (days since first date)
+    const firstDate = new Date(dates[0]).getTime();
+    const x = dates.map(d => (new Date(d).getTime() - firstDate) / (1000 * 60 * 60 * 24));
+    const y = scores;
+
+    const n = x.length;
+    const sumX = x.reduce((a, b) => a + b, 0);
+    const sumY = y.reduce((a, b) => a + b, 0);
+    const sumXY = x.reduce((total, xi, i) => total + xi * y[i], 0);
+    const sumXX = x.reduce((total, xi) => total + xi * xi, 0);
+
+    const denominator = (n * sumXX - sumX * sumX);
+    if (denominator === 0) return null;
+
+    const slope = (n * sumXY - sumX * sumY) / denominator;
+    const intercept = (sumY - slope * sumX) / n;
+
+    // Convert slope to per-year
+    const slopePerYear = slope * 365;
+
+    return {
+        slope: slopePerYear,
+        intercept,
+        predict: (date) => {
+            const daysSinceFirst = (new Date(date).getTime() - firstDate) / (1000 * 60 * 60 * 24);
+            return intercept + slope * daysSinceFirst;
+        },
+        startDate: dates[0],
+        endDate: dates[dates.length - 1]
+    };
+}
 
 // Global state
 let appState = {
@@ -546,12 +587,10 @@ function renderAll() {
  * Render the trend chart with dynamic trend lines based on benchmark data
  */
 function renderTrendChart(data) {
-    const trends = data.trends || {};
     const models = data.trend_models || data.models;
     const traces = [];
     const annotations = [];
     const scoreField = getScoreField();
-    const trendMeta = trends.metadata || {};
 
     if (!models || models.length === 0) {
         document.getElementById('trend-chart').innerHTML =
@@ -559,148 +598,146 @@ function renderTrendChart(data) {
         return;
     }
 
-    // All models scatter
-    const closedModels = models.filter(m => !m.is_open && m.date && (m[scoreField] || m.eci || m.score));
-    const openModels = models.filter(m => m.is_open && m.date && (m[scoreField] || m.eci || m.score));
     const getScore = (m) => m[scoreField] ?? m.eci ?? m.score;
-
-    traces.push({
-        x: closedModels.map(m => m.date),
-        y: closedModels.map(m => getScore(m)),
-        mode: 'markers',
-        type: 'scatter',
-        name: 'Closed',
-        marker: { color: COLORS.closed, size: 8, opacity: 0.6 },
-        text: closedModels.map(m => m.display_name),
-    });
-
-    traces.push({
-        x: openModels.map(m => m.date),
-        y: openModels.map(m => getScore(m)),
-        mode: 'markers',
-        type: 'scatter',
-        name: 'Open',
-        marker: { color: COLORS.open, size: 8, opacity: 0.6 },
-        text: openModels.map(m => m.display_name),
-    });
-
     const benchmarkMetadata = getBenchmarkMetadata();
     const unitName = appState.currentBenchmark === 'eci' ? 'ECI points' : (benchmarkMetadata?.unit || 'points');
 
-    // Determine which trend keys to use from metadata
-    let earlyKey = null;
-    let recentKey = null;
+    // Filter models based on current framing
+    let category1Models, category2Models;
+    let cat1Name, cat2Name, cat1Color, cat2Color;
 
-    if (trendMeta.has_split) {
-        earlyKey = trendMeta.early_key;
-        recentKey = trendMeta.recent_key;
+    if (appState.framing === 'china') {
+        category1Models = models.filter(m => m.is_china && m.date && getScore(m) !== undefined);
+        category2Models = models.filter(m => !m.is_china && m.date && getScore(m) !== undefined);
+        cat1Name = 'China';
+        cat2Name = 'US/Other';
+        cat1Color = COLORS.china;
+        cat2Color = COLORS.us;
+    } else {
+        category1Models = models.filter(m => !m.is_open && m.date && getScore(m) !== undefined);
+        category2Models = models.filter(m => m.is_open && m.date && getScore(m) !== undefined);
+        cat1Name = 'Closed';
+        cat2Name = 'Open';
+        cat1Color = COLORS.closed;
+        cat2Color = COLORS.open;
     }
 
-    // Add trend lines if we have a split
-    if (earlyKey && recentKey && trends[earlyKey] && trends[recentKey]) {
-        const earlyTrend = trends[earlyKey];
-        const recentTrend = trends[recentKey];
+    // Sort models by date for trend calculation
+    category1Models.sort((a, b) => new Date(a.date) - new Date(b.date));
+    category2Models.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-        // Early trend line (dotted)
+    // Add scatter traces for both categories
+    traces.push({
+        x: category1Models.map(m => m.date),
+        y: category1Models.map(m => getScore(m)),
+        mode: 'markers',
+        type: 'scatter',
+        name: cat1Name,
+        marker: { color: cat1Color, size: 8, opacity: 0.6 },
+        text: category1Models.map(m => m.display_name),
+    });
+
+    traces.push({
+        x: category2Models.map(m => m.date),
+        y: category2Models.map(m => getScore(m)),
+        mode: 'markers',
+        type: 'scatter',
+        name: cat2Name,
+        marker: { color: cat2Color, size: 8, opacity: 0.6 },
+        text: category2Models.map(m => m.display_name),
+    });
+
+    // Calculate trend lines for each category
+    const cat1Regression = category1Models.length >= 3
+        ? linearRegression(category1Models.map(m => m.date), category1Models.map(m => getScore(m)))
+        : null;
+    const cat2Regression = category2Models.length >= 3
+        ? linearRegression(category2Models.map(m => m.date), category2Models.map(m => getScore(m)))
+        : null;
+
+    // Add trend line for category 1
+    if (cat1Regression) {
+        const startY = cat1Regression.predict(cat1Regression.startDate);
+        const endY = cat1Regression.predict(cat1Regression.endDate);
         traces.push({
-            x: [earlyTrend.start_point.date, earlyTrend.end_point.date],
-            y: [earlyTrend.start_point.eci, earlyTrend.end_point.eci],
+            x: [cat1Regression.startDate, cat1Regression.endDate],
+            y: [startY, endY],
             mode: 'lines',
             type: 'scatter',
-            name: earlyTrend.name,
-            line: { width: 4, dash: 'dot', color: COLORS.annotation }
+            name: `${cat1Name} Trend`,
+            line: { width: 3, dash: 'dot', color: cat1Color }
         });
 
-        // Recent trend line (solid)
-        traces.push({
-            x: [recentTrend.start_point.date, recentTrend.end_point.date],
-            y: [recentTrend.start_point.eci, recentTrend.end_point.eci],
-            mode: 'lines',
-            type: 'scatter',
-            name: recentTrend.name,
-            line: { width: 4, dash: 'solid', color: COLORS.open }
-        });
-
-        // Early trend annotation
+        // Annotation for category 1 trend
+        const growthRate = cat1Regression.slope.toFixed(1);
         annotations.push({
-            x: earlyTrend.end_point.date,
-            y: earlyTrend.end_point.eci,
-            text: `<b>${earlyTrend.name} Growth</b><br>+${earlyTrend.absolute_growth_per_year} ${unitName}/year`,
+            x: cat1Regression.endDate,
+            y: endY,
+            text: `<b>${cat1Name} Growth</b><br>+${growthRate} ${unitName}/year`,
             showarrow: true,
             arrowhead: 2,
-            ax: -120,
-            ay: -30,
-            bgcolor: 'rgba(255, 255, 255, 0.9)',
-            borderpad: 4,
-            bordercolor: COLORS.gridline,
-            borderwidth: 1,
-            align: 'left',
-            font: { size: 12, color: COLORS.text }
-        });
-
-        // Recent trend annotation with comparison
-        let recentText = `<b>${recentTrend.name} Growth</b><br>+${recentTrend.absolute_growth_per_year} ${unitName}/year`;
-        if (earlyTrend.absolute_growth_per_year > 0) {
-            const factor = (recentTrend.absolute_growth_per_year / earlyTrend.absolute_growth_per_year).toFixed(1);
-            recentText += `<br>${factor}x faster than ${earlyTrend.name}`;
-        }
-
-        annotations.push({
-            x: recentTrend.start_point.date,
-            y: recentTrend.start_point.eci,
-            text: recentText,
-            showarrow: true,
-            arrowhead: 2,
-            ax: 120,
-            ay: 30,
-            bgcolor: 'rgba(255, 255, 255, 0.9)',
-            borderpad: 4,
-            bordercolor: COLORS.gridline,
-            borderwidth: 1,
-            align: 'left',
-            font: { size: 12, color: COLORS.text }
-        });
-    } else if (trends.overall) {
-        // Just show overall trend line if no split
-        const overallTrend = trends.overall;
-        traces.push({
-            x: [overallTrend.start_point.date, overallTrend.end_point.date],
-            y: [overallTrend.start_point.eci, overallTrend.end_point.eci],
-            mode: 'lines',
-            type: 'scatter',
-            name: 'Overall Trend',
-            line: { width: 4, dash: 'solid', color: COLORS.open }
-        });
-
-        annotations.push({
-            x: overallTrend.end_point.date,
-            y: overallTrend.end_point.eci,
-            text: `<b>Overall Growth</b><br>+${overallTrend.absolute_growth_per_year} ${unitName}/year`,
-            showarrow: true,
-            arrowhead: 2,
-            ax: -80,
+            ax: -100,
             ay: -40,
             bgcolor: 'rgba(255, 255, 255, 0.9)',
             borderpad: 4,
-            bordercolor: COLORS.gridline,
+            bordercolor: cat1Color,
             borderwidth: 1,
             align: 'left',
-            font: { size: 12, color: COLORS.text }
+            font: { size: 11, color: '#333' }
         });
     }
 
-    // Update trend chart title based on available data
+    // Add trend line for category 2
+    if (cat2Regression) {
+        const startY = cat2Regression.predict(cat2Regression.startDate);
+        const endY = cat2Regression.predict(cat2Regression.endDate);
+        traces.push({
+            x: [cat2Regression.startDate, cat2Regression.endDate],
+            y: [startY, endY],
+            mode: 'lines',
+            type: 'scatter',
+            name: `${cat2Name} Trend`,
+            line: { width: 3, dash: 'solid', color: cat2Color }
+        });
+
+        // Annotation for category 2 trend with comparison
+        const growthRate = cat2Regression.slope.toFixed(1);
+        let annotationText = `<b>${cat2Name} Growth</b><br>+${growthRate} ${unitName}/year`;
+
+        if (cat1Regression && cat1Regression.slope > 0) {
+            const factor = (cat2Regression.slope / cat1Regression.slope).toFixed(1);
+            if (factor > 1) {
+                annotationText += `<br>${factor}x faster than ${cat1Name}`;
+            } else if (factor < 1 && factor > 0) {
+                annotationText += `<br>${(1/factor).toFixed(1)}x slower than ${cat1Name}`;
+            }
+        }
+
+        annotations.push({
+            x: cat2Regression.endDate,
+            y: endY,
+            text: annotationText,
+            showarrow: true,
+            arrowhead: 2,
+            ax: 100,
+            ay: 40,
+            bgcolor: 'rgba(255, 255, 255, 0.9)',
+            borderpad: 4,
+            bordercolor: cat2Color,
+            borderwidth: 1,
+            align: 'left',
+            font: { size: 11, color: '#333' }
+        });
+    }
+
+    // Update trend chart title based on framing
     const trendTitle = document.getElementById('trend-title');
     const trendSubtitle = document.getElementById('trend-subtitle');
     if (trendTitle && trendSubtitle) {
         const scoreLabel = appState.currentBenchmark === 'eci' ? 'ECI' : 'Score';
-        if (trendMeta.has_split && trendMeta.split_label) {
-            trendTitle.textContent = `${scoreLabel} Growth Trends (Pre vs Post ${trendMeta.split_label})`;
-            trendSubtitle.textContent = `Comparing the rate of ${scoreLabel.toLowerCase()} increases before and after ${trendMeta.split_label}.`;
-        } else {
-            trendTitle.textContent = `${scoreLabel} Growth Trend`;
-            trendSubtitle.textContent = `Overall ${scoreLabel.toLowerCase()} growth rate for this benchmark.`;
-        }
+        const framingLabel = appState.framing === 'china' ? 'China vs US/Other' : 'Open vs Closed';
+        trendTitle.textContent = `${scoreLabel} Growth Trends: ${framingLabel}`;
+        trendSubtitle.textContent = `Comparing ${scoreLabel.toLowerCase()} growth rates between ${cat1Name.toLowerCase()} and ${cat2Name.toLowerCase()} models.`;
     }
 
     // Add "current date" vertical line logic
@@ -723,8 +760,7 @@ function renderTrendChart(data) {
     });
 
     // Y-axis title based on benchmark
-    const trendMetadata = getBenchmarkMetadata();
-    const yAxisTitle = appState.currentBenchmark === 'eci' ? 'ECI Score' : (trendMetadata?.unit || 'Score');
+    const yAxisTitle = appState.currentBenchmark === 'eci' ? 'ECI Score' : (benchmarkMetadata?.unit || 'Score');
 
     // ECI-specific reference annotations (only show for ECI benchmark)
     const eciAnnotations = appState.currentBenchmark === 'eci' ? [
@@ -812,7 +848,6 @@ function renderTrendChart(data) {
         plot_bgcolor: 'transparent',
     };
 
-    // Attempt to reuse config if possible or redefine
     const config = {
         responsive: true,
         displayModeBar: 'hover',
@@ -820,48 +855,7 @@ function renderTrendChart(data) {
         displaylogo: false,
     };
 
-    Plotly.newPlot('trend-chart', traces, layout, config).then(function (gd) {
-        gd.on('plotly_restyle', function (data) {
-            // data typically contains the update object (e.g. {visible: ['legendonly']}) and indices
-            // But we can simpler just check the full state of the chart
-
-            const currentTraces = gd.data;
-            const newAnnotations = [...layout.annotations]; // Copy existing structure
-
-            // Map known trace names to annotation indices
-            // Based on our loop above: 
-            // - traces[0]: Closed
-            // - traces[1]: Open
-            // - traces[2]: Pre-Mar 2024
-            // - traces[3]: Post-Mar 2024
-
-            // And annotations array:
-            // - annotations[0]: Pre-Mar 2024
-            // - annotations[1]: Post-Mar 2024
-
-            // We need to dynamically find the trace index for each trend name
-            const preTrendTraceIndex = currentTraces.findIndex(t => t.name === trends['pre_mar_2024']?.name);
-            const postTrendTraceIndex = currentTraces.findIndex(t => t.name === trends['post_mar_2024']?.name);
-
-            // Find annotation indices (assuming order matches creation order if we are consistent)
-            // But better to check some property? Text content is unique enough or we rely on loop order.
-            // Loop order: pre_mar_2024 pushed first, then post_mar_2024.
-            const preAnnotationIndex = 0;
-            const postAnnotationIndex = 1;
-
-            if (preTrendTraceIndex !== -1 && trends['pre_mar_2024']) {
-                const isVisible = currentTraces[preTrendTraceIndex].visible !== 'legendonly';
-                if (newAnnotations[preAnnotationIndex]) newAnnotations[preAnnotationIndex].visible = isVisible;
-            }
-
-            if (postTrendTraceIndex !== -1 && trends['post_mar_2024']) {
-                const isVisible = currentTraces[postTrendTraceIndex].visible !== 'legendonly';
-                if (newAnnotations[postAnnotationIndex]) newAnnotations[postAnnotationIndex].visible = isVisible;
-            }
-
-            Plotly.relayout(gd, { annotations: newAnnotations });
-        });
-    });
+    Plotly.newPlot('trend-chart', traces, layout, config);
 }
 
 /**
