@@ -188,12 +188,21 @@ function updateBenchmarkDisplay() {
         dataSummary.textContent = `View Raw ${metadata.name || 'Benchmark'} Data (All Models)`;
     }
 
-    // Update chart note with actual threshold value
+    // Update chart note with actual threshold value and appropriate wording
     const chartNote = document.getElementById('chart-note');
     if (chartNote && metadata?.threshold !== undefined) {
         const thresholdValue = metadata.threshold;
-        const unit = metadata.unit || 'points';
-        chartNote.innerHTML = `Note: A model is deemed to have caught up if its score is <strong>within ${thresholdValue} ${unit}</strong> of the reference model.<br>
+
+        // Generate appropriate threshold description based on benchmark type
+        let thresholdDesc;
+        if (appState.currentBenchmark === 'eci') {
+            thresholdDesc = `${thresholdValue} ECI point${thresholdValue !== 1 ? 's' : ''}`;
+        } else {
+            // For percentage-based benchmarks (Accuracy, Resolve Rate, Score, etc.)
+            thresholdDesc = `${thresholdValue} percentage point${thresholdValue !== 1 ? 's' : ''}`;
+        }
+
+        chartNote.innerHTML = `Note: A model is deemed to have caught up if its score is <strong>within ${thresholdDesc}</strong> of the reference model.<br>
             <em>Average gap is computed by sampling 100 score levels and measuring time-to-match at each level, starting from the level where reference models first appear.<br>
             Matched/Unmatched counts reflect all reference models shown on the chart.</em>`;
     }
