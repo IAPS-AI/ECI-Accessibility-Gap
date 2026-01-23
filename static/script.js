@@ -665,21 +665,26 @@ function renderTrendChart(data) {
         ? linearRegression(category2Models.map(m => m.date), category2Models.map(m => getScore(m)))
         : null;
 
+    // Track which annotations belong to which trend lines
+    const trendAnnotationMap = {}; // Maps trace name to annotation index
+
     // Add trend line for category 1
     if (cat1Regression) {
         const startY = cat1Regression.predict(cat1Regression.startDate);
         const endY = cat1Regression.predict(cat1Regression.endDate);
+        const trendName = `${cat1Name} Trend`;
         traces.push({
             x: [cat1Regression.startDate, cat1Regression.endDate],
             y: [startY, endY],
             mode: 'lines',
             type: 'scatter',
-            name: `${cat1Name} Trend`,
+            name: trendName,
             line: { width: 3, dash: 'dot', color: cat1Color }
         });
 
         // Annotation for category 1 trend
         const growthRate = cat1Regression.slope.toFixed(1);
+        trendAnnotationMap[trendName] = annotations.length; // Track annotation index
         annotations.push({
             x: cat1Regression.endDate,
             y: endY,
@@ -693,7 +698,8 @@ function renderTrendChart(data) {
             bordercolor: cat1Color,
             borderwidth: 1,
             align: 'left',
-            font: { size: 11, color: '#333' }
+            font: { size: 11, color: '#333' },
+            visible: true
         });
     }
 
@@ -701,12 +707,13 @@ function renderTrendChart(data) {
     if (cat2Regression) {
         const startY = cat2Regression.predict(cat2Regression.startDate);
         const endY = cat2Regression.predict(cat2Regression.endDate);
+        const trendName = `${cat2Name} Trend`;
         traces.push({
             x: [cat2Regression.startDate, cat2Regression.endDate],
             y: [startY, endY],
             mode: 'lines',
             type: 'scatter',
-            name: `${cat2Name} Trend`,
+            name: trendName,
             line: { width: 3, dash: 'solid', color: cat2Color }
         });
 
@@ -723,6 +730,7 @@ function renderTrendChart(data) {
             }
         }
 
+        trendAnnotationMap[trendName] = annotations.length; // Track annotation index
         annotations.push({
             x: cat2Regression.endDate,
             y: endY,
@@ -736,7 +744,8 @@ function renderTrendChart(data) {
             bordercolor: cat2Color,
             borderwidth: 1,
             align: 'left',
-            font: { size: 11, color: '#333' }
+            font: { size: 11, color: '#333' },
+            visible: true
         });
     }
 
@@ -865,7 +874,40 @@ function renderTrendChart(data) {
         displaylogo: false,
     };
 
-    Plotly.newPlot('trend-chart', traces, layout, config);
+    Plotly.newPlot('trend-chart', traces, layout, config).then(function(gd) {
+        // Handle legend clicks to show/hide corresponding annotations
+        gd.on('plotly_restyle', function(eventData) {
+            if (!eventData || !eventData[0] || eventData[0].visible === undefined) return;
+
+            const visibilityChanges = eventData[0].visible;
+            const traceIndices = eventData[1];
+
+            // Build new annotations array with updated visibility
+            const newAnnotations = [...layout.annotations];
+
+            traceIndices.forEach((traceIdx, i) => {
+                const trace = gd.data[traceIdx];
+                if (!trace) return;
+
+                const annotationIdx = trendAnnotationMap[trace.name];
+                if (annotationIdx === undefined) return;
+
+                // Get visibility state (can be true, false, or 'legendonly')
+                const isVisible = Array.isArray(visibilityChanges)
+                    ? visibilityChanges[i] !== 'legendonly' && visibilityChanges[i] !== false
+                    : visibilityChanges !== 'legendonly' && visibilityChanges !== false;
+
+                if (newAnnotations[annotationIdx]) {
+                    newAnnotations[annotationIdx] = {
+                        ...newAnnotations[annotationIdx],
+                        visible: isVisible
+                    };
+                }
+            });
+
+            Plotly.relayout(gd, { annotations: newAnnotations });
+        });
+    });
 }
 
 /**
