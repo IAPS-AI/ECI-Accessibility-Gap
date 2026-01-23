@@ -155,40 +155,62 @@ def calculate_horizontal_gaps(
 
     return gaps
 
-def calculate_trends(df: pd.DataFrame) -> dict:
-    """Calculate trends for models before and after Apr 2024."""
+def calculate_trends(df: pd.DataFrame, score_col: str = "eci") -> dict:
+    """
+    Calculate trends dynamically based on the data's date range.
+
+    For datasets spanning > 1 year, splits at the midpoint to show early vs recent trends.
+    For shorter datasets, shows only the overall trend.
+    """
     trends = {}
-    cutoff = pd.Timestamp("2024-04-01")
-    
+
+    if len(df) < 2:
+        return {"overall": None, "metadata": {"has_split": False}}
+
+    df = df.sort_values("date")
+    min_date = df["date"].min()
+    max_date = df["date"].max()
+    date_range_days = (max_date - min_date).days
+
     def get_stats(sub_df, name):
         if len(sub_df) < 2:
             return None
-            
+
         dates_ordinal = sub_df["date"].map(datetime.toordinal).values
-        ecis = sub_df["eci"].values
-        
-        lin_slope, lin_intercept, _, _, _ = linregress(dates_ordinal, ecis)
+        scores = sub_df[score_col].values
+
+        # Check if all dates are identical (can't compute regression)
+        if len(set(dates_ordinal)) < 2:
+            return None
+
+        lin_slope, lin_intercept, _, _, _ = linregress(dates_ordinal, scores)
         yearly_absolute_growth = lin_slope * 365.25
-        
+
         start_date_ord = dates_ordinal.min()
         end_date_ord = dates_ordinal.max()
-        
-        lin_start_eci = lin_slope * start_date_ord + lin_intercept
-        lin_end_eci = lin_slope * end_date_ord + lin_intercept
-        
-        valid_indices = ecis > 0
+
+        lin_start_score = lin_slope * start_date_ord + lin_intercept
+        lin_end_score = lin_slope * end_date_ord + lin_intercept
+
+        valid_indices = scores > 0
         if not np.any(valid_indices):
             return None
-            
-        log_ecis = np.log(ecis[valid_indices])
+
+        log_scores = np.log(scores[valid_indices])
         log_dates = dates_ordinal[valid_indices]
-        
-        exp_slope, _, _, _, _ = linregress(log_dates, log_ecis)
-        k_annual = exp_slope * 365.25
-        
-        pct_growth = (np.exp(k_annual) - 1) * 100
-        multiples_per_year = np.exp(k_annual)
-        doubling_time_years = np.log(2) / k_annual if k_annual > 0 else float('inf')
+
+        # Check if we have enough unique dates for exponential regression
+        if len(set(log_dates)) < 2:
+            # Can't compute exponential growth, use defaults
+            pct_growth = 0
+            multiples_per_year = 1
+            doubling_time_years = float('inf')
+        else:
+            exp_slope, _, _, _, _ = linregress(log_dates, log_scores)
+            k_annual = exp_slope * 365.25
+            pct_growth = (np.exp(k_annual) - 1) * 100
+            multiples_per_year = np.exp(k_annual)
+            doubling_time_years = np.log(2) / k_annual if k_annual > 0 else float('inf')
 
         return {
             "name": name,
@@ -198,20 +220,58 @@ def calculate_trends(df: pd.DataFrame) -> dict:
             "doubling_time_years": round(doubling_time_years, 2),
             "start_point": {
                 "date": datetime.fromordinal(int(start_date_ord)).isoformat(),
-                "eci": lin_start_eci
+                "eci": lin_start_score  # Keep as "eci" for frontend compatibility
             },
             "end_point": {
                 "date": datetime.fromordinal(int(end_date_ord)).isoformat(),
-                "eci": lin_end_eci
+                "eci": lin_end_score  # Keep as "eci" for frontend compatibility
             }
         }
 
-    pre_2024 = df[df["date"] < cutoff]
-    trends["pre_apr_2024"] = get_stats(pre_2024, "Pre-Apr 2024")
-    
-    post_2024 = df[df["date"] >= cutoff]
-    trends["post_apr_2024"] = get_stats(post_2024, "Post-Apr 2024")
-    
+    def format_date_label(dt):
+        """Format date as 'Mon YYYY' for trend labels."""
+        return dt.strftime("%b %Y")
+
+    # Calculate overall trend
+    trends["overall"] = get_stats(df, "Overall")
+
+    # Only split if we have > 1 year of data and enough points
+    if date_range_days > 365 and len(df) >= 6:
+        # Find midpoint date
+        midpoint = min_date + pd.Timedelta(days=date_range_days // 2)
+
+        early_df = df[df["date"] < midpoint]
+        recent_df = df[df["date"] >= midpoint]
+
+        # Only create split trends if both periods have enough data
+        if len(early_df) >= 3 and len(recent_df) >= 3:
+            early_label = f"Pre-{format_date_label(midpoint)}"
+            recent_label = f"Post-{format_date_label(midpoint)}"
+
+            trends["early"] = get_stats(early_df, early_label)
+            trends["recent"] = get_stats(recent_df, recent_label)
+            trends["metadata"] = {
+                "has_split": True,
+                "split_date": midpoint.isoformat(),
+                "split_label": format_date_label(midpoint),
+                "early_key": "early",
+                "recent_key": "recent"
+            }
+        else:
+            trends["metadata"] = {"has_split": False}
+    else:
+        trends["metadata"] = {"has_split": False}
+
+    # For backwards compatibility with ECI, also include pre/post Apr 2024 if applicable
+    if date_range_days > 365:
+        apr_2024 = pd.Timestamp("2024-04-01")
+        if min_date < apr_2024 < max_date:
+            pre_apr = df[df["date"] < apr_2024]
+            post_apr = df[df["date"] >= apr_2024]
+            if len(pre_apr) >= 2 and len(post_apr) >= 2:
+                trends["pre_apr_2024"] = get_stats(pre_apr, "Pre-Apr 2024")
+                trends["post_apr_2024"] = get_stats(post_apr, "Post-Apr 2024")
+
     return trends
 
 def estimate_current_gap(gaps: list[dict], matched_gaps_months: list[float]) -> dict:
