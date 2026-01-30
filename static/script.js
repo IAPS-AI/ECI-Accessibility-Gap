@@ -837,8 +837,6 @@ function renderTrendChart(data) {
             title: yAxisTitle,
             ...(isTrendMetr ? {
                 type: 'log',
-                tickvals: [0.1, 0.5, 1, 5, 10, 50, 100, 500],
-                ticktext: ['0.1', '0.5', '1', '5', '10', '50', '100', '500'],
             } : {}),
         },
         annotations: [
@@ -1228,11 +1226,8 @@ function renderChart(data) {
             tickfont: { size: 11, color: COLORS.annotation },
             gridcolor: COLORS.gridline,
             zeroline: false,
-            // METR spans 0.04–320 min; log scale with explicit ticks spreads data evenly
             ...(isMetr ? {
                 type: 'log',
-                tickvals: [0.1, 0.5, 1, 5, 10, 50, 100, 500],
-                ticktext: ['0.1', '0.5', '1', '5', '10', '50', '100', '500'],
             } : {
                 tickformat: '.0f',
             }),
