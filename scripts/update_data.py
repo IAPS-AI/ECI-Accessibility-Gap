@@ -975,7 +975,7 @@ def process_metr_data(metr_raw: dict) -> Optional[dict]:
         model_col="model"
     )
 
-    stats = calculate_statistics(df_frontier, gaps, score_col="score", prior_from_first_match=True)
+    stats = calculate_statistics(df_frontier, gaps, score_col="score", use_survival_analysis=False)
 
     historical_gaps = calculate_historical_gaps(
         df_frontier,
@@ -1005,7 +1005,7 @@ def process_metr_data(metr_raw: dict) -> Optional[dict]:
         df_cu_frontier = df_cu_combined[df_cu_combined["group_rank"] <= 1].copy()
 
         china_gaps = calculate_horizontal_gaps(df_cu_frontier, score_col="score", threshold=0, model_col="model")
-        china_stats = calculate_statistics(df_cu_frontier, china_gaps, score_col="score", prior_from_first_match=True)
+        china_stats = calculate_statistics(df_cu_frontier, china_gaps, score_col="score", use_survival_analysis=False)
         china_historical = calculate_historical_gaps(df_cu_frontier, score_col="score", threshold=0, model_col="model")
         china_framing = {
             "gaps": china_gaps,

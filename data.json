@@ -3760,20 +3760,14 @@
         "current_gap_estimate": {
           "estimated_current_gap": 11.1,
           "min_current_gap": 11.1,
-          "confidence": "medium",
+          "confidence": "high",
           "unmatched_ages": [
             11.1,
             9.5,
             5.8,
             2.2
           ],
-          "method": "survival_analysis_mle",
-          "prior_from_first_match": true,
-          "prior_params": {
-            "mu": 1.615,
-            "sigma": 0.371,
-            "prior_mean_months": 5.4
-          }
+          "method": "oldest_unmatched"
         }
       },
       "trends": {
@@ -4185,22 +4179,16 @@
           "total_matched": 11,
           "total_unmatched": 4,
           "current_gap_estimate": {
-            "estimated_current_gap": 11.8,
+            "estimated_current_gap": 11.1,
             "min_current_gap": 11.1,
-            "confidence": "medium",
+            "confidence": "high",
             "unmatched_ages": [
               11.1,
               9.5,
               5.8,
               2.2
             ],
-            "method": "survival_analysis_mle",
-            "prior_from_first_match": true,
-            "prior_params": {
-              "mu": 1.695,
-              "sigma": 0.48,
-              "prior_mean_months": 6.1
-            }
+            "method": "oldest_unmatched"
           }
         },
         "historical_gaps": [
@@ -10171,5 +10159,5 @@
     }
   },
   "default_benchmark": "eci",
-  "last_updated": "2026-01-30T21:34:17.094635"
+  "last_updated": "2026-01-30T21:39:15.296558"
 }
