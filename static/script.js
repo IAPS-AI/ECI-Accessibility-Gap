@@ -448,28 +448,34 @@ function showExplainer(stats, gaps) {
     const content = explainer.querySelector('.explainer-content');
     if (!content) return;
 
+    const avgGap = stats.avg_horizontal_gap_months?.toFixed(1) || '--';
+    const minBoundVal = estimate.min_current_gap || '--';
+    const priorFiltered = estimate.prior_from_first_match;
+
     if (method === 'oldest_unmatched') {
         content.innerHTML = `
             <p>The <strong>estimated current gap</strong> is the age of the <strong>oldest unmatched</strong> frontier model &mdash; the minimum time the open-source frontier has been behind.</p>
             <p>These frontier models have not yet been matched by an open-source model:</p>
             <ul>${unmatchedListHtml}</ul>
-            <p>The oldest unmatched model has been waiting <strong>${estimate.min_current_gap} months</strong>, so the current gap is at least this long.</p>
+            <p>The oldest unmatched model has been waiting <strong>${minBoundVal} months</strong>, so the current gap is at least this long.</p>
         `;
     } else {
         // Survival analysis explanation
-        const avgGap = stats.avg_horizontal_gap_months?.toFixed(1) || '--';
-        const minBoundVal = estimate.min_current_gap || '--';
+        const priorNote = priorFiltered
+            ? `<p><em>Note: The prior is fitted only to matched gaps from the <strong>competitive era</strong> (closed models released after the first open model matched any closed model). This excludes early gaps from before open-source alternatives existed.</em></p>`
+            : '';
         content.innerHTML = `
             <p>The <strong>average gap</strong> (${avgGap} months) is based on historical matched pairs, but this may underestimate the <em>current</em> gap because it doesn't fully account for models that haven't been matched yet.</p>
             <p>The <strong>estimated current gap</strong> treats unmatched frontier models as <strong>censored observations</strong> &mdash; they tell us the gap is <em>at least</em> as long as their age:</p>
             <ul>${unmatchedListHtml}</ul>
             <p><strong>Methodology:</strong> We use survival analysis with Maximum Likelihood Estimation:</p>
             <ol>
-                <li><strong>Fit prior:</strong> A log-normal distribution is fit to historical matched gaps</li>
+                <li><strong>Fit prior:</strong> A log-normal distribution is fit to ${priorFiltered ? 'recent ' : ''}historical matched gaps</li>
                 <li><strong>Censored likelihood:</strong> Unmatched models contribute P(gap &gt; observed_age) to the likelihood</li>
                 <li><strong>Truncated expectation:</strong> For each unmatched model, compute E[gap | gap &gt; age] using the truncated log-normal formula</li>
                 <li><strong>Weighted estimate:</strong> Combine expectations, weighting older models more heavily (they're more informative)</li>
             </ol>
+            ${priorNote}
             <p class="explainer-note">
                 <strong>Minimum bound:</strong> ${minBoundVal} months &mdash; the gap cannot be shorter than the age of the oldest unmatched model.
             </p>

@@ -417,6 +417,7 @@ def estimate_current_gap(gaps: list[dict], matched_gaps_months: list[float], use
         "confidence": confidence,
         "unmatched_ages": [round(a, 1) for a in unmatched_ages],
         "method": "survival_analysis_mle",
+        "prior_from_first_match": prior_from_first_match,
         "prior_params": {
             "mu": round(float(mu_prior), 3),
             "sigma": round(float(sigma_prior), 3),

@@ -1863,6 +1863,7 @@
             2.4
           ],
           "method": "survival_analysis_mle",
+          "prior_from_first_match": false,
           "prior_params": {
             "mu": 1.587,
             "sigma": 0.518,
@@ -2398,6 +2399,7 @@
               2.4
             ],
             "method": "survival_analysis_mle",
+            "prior_from_first_match": false,
             "prior_params": {
               "mu": 1.782,
               "sigma": 0.39,
@@ -3766,6 +3768,7 @@
             2.2
           ],
           "method": "survival_analysis_mle",
+          "prior_from_first_match": true,
           "prior_params": {
             "mu": 1.615,
             "sigma": 0.371,
@@ -4192,6 +4195,7 @@
               2.2
             ],
             "method": "survival_analysis_mle",
+            "prior_from_first_match": true,
             "prior_params": {
               "mu": 1.695,
               "sigma": 0.48,
@@ -10167,5 +10171,5 @@
     }
   },
   "default_benchmark": "eci",
-  "last_updated": "2026-01-30T21:21:27.747899"
+  "last_updated": "2026-01-30T21:34:17.094635"
 }
