@@ -1104,6 +1104,19 @@ def main():
         # Process all benchmarks
         data = process_all_benchmarks()
 
+        # Preserve benchmarks from existing data.json that we couldn't regenerate
+        # (e.g., Airtable benchmarks when credentials aren't available locally)
+        try:
+            with open("data.json", "r") as f:
+                existing_data = json.load(f)
+            existing_benchmarks = existing_data.get("benchmarks", {})
+            for bid, bdata in existing_benchmarks.items():
+                if bid not in data["benchmarks"]:
+                    data["benchmarks"][bid] = bdata
+                    logger.info(f"  Preserved existing benchmark: {bid}")
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
         # Write the new multi-benchmark format
         with open("data.json", "w") as f:
             json.dump(data, f, indent=2)

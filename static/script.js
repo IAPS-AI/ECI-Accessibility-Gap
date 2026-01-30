@@ -798,7 +798,7 @@ function renderTrendChart(data) {
 
     // Y-axis title and scale based on benchmark
     const yAxisTitle = appState.currentBenchmark === 'eci' ? 'ECI Score' :
-                       appState.currentBenchmark === 'metr_time_horizon' ? 'p50 Time Horizon (minutes, log scale)' :
+                       appState.currentBenchmark === 'metr_time_horizon' ? 'p50 Time Horizon (minutes)' :
                        (benchmarkMetadata?.unit || 'Score');
     const useLogScale = appState.currentBenchmark === 'metr_time_horizon';
 
@@ -1203,9 +1203,8 @@ function renderChart(data) {
 
     // Y-axis title based on benchmark
     const chartYAxisTitle = appState.currentBenchmark === 'eci' ? 'ECI Score' :
-                            appState.currentBenchmark === 'metr_time_horizon' ? 'p50 Time Horizon (minutes, log scale)' :
+                            appState.currentBenchmark === 'metr_time_horizon' ? 'p50 Time Horizon (minutes)' :
                             (metadata?.unit || 'Score');
-    const chartUseLogScale = appState.currentBenchmark === 'metr_time_horizon';
 
     // Layout
     const layout = {
@@ -1222,10 +1221,9 @@ function renderChart(data) {
             title: chartYAxisTitle,
             titlefont: { size: 12, color: COLORS.annotation },
             tickfont: { size: 11, color: COLORS.annotation },
-            tickformat: chartUseLogScale ? '' : '.0f',
+            tickformat: '.0f',
             gridcolor: COLORS.gridline,
             zeroline: false,
-            ...(chartUseLogScale ? { type: 'log', dtick: 1 } : {}),
         },
         shapes: shapes,
         annotations: annotations,
