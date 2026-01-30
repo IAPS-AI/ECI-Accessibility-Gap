@@ -89,8 +89,7 @@ def calculate_horizontal_gaps(
     df: pd.DataFrame,
     score_col: str = "eci",
     threshold: float = ECI_MATCH_THRESHOLD,
-    model_col: str = "Model",
-    threshold_type: str = "additive",
+    model_col: str = "Model"
 ) -> list[dict]:
     """
     Calculate horizontal gaps between closed and open models.
@@ -98,10 +97,8 @@ def calculate_horizontal_gaps(
     Args:
         df: DataFrame with model data
         score_col: Column name for the score/metric
-        threshold: Gap matching threshold
+        threshold: Gap matching threshold (additive: score >= closed - threshold)
         model_col: Column name for model identifier
-        threshold_type: "additive" (score >= closed - threshold) or
-                        "ratio" (score >= closed * threshold)
     """
     if len(df) == 0:
         return []
@@ -127,13 +124,8 @@ def calculate_horizontal_gaps(
             if open_row["date"] <= closed_date:
                 continue
 
-            # Match based on threshold type
-            if threshold_type == "ratio":
-                target = closed_score * threshold
-            else:
-                target = closed_score - threshold
-
-            if open_row[score_col] >= target:
+            # Match if open model is within threshold of closed model
+            if open_row[score_col] >= closed_score - threshold:
                 matching_open = open_row
                 match_type = "exact"
                 break
@@ -305,16 +297,10 @@ def calculate_trends(df: pd.DataFrame, score_col: str = "eci", use_apr_2024_spli
 
 def estimate_current_gap(gaps: list[dict], matched_gaps_months: list[float]) -> dict:
     """
-    Estimate the current gap using survival analysis with censored observations.
+    Estimate the current gap based on currently unmatched models.
 
-    Approach: Fit a log-normal distribution to historical gaps, then use
-    Maximum Likelihood Estimation (MLE) that accounts for right-censored data
-    (unmatched models where we only know gap >= observed age).
-
-    The log-normal distribution is appropriate because:
-    1. Gaps are always positive
-    2. The distribution is right-skewed (some gaps are much longer than average)
-    3. It's commonly used in survival analysis for time-to-event data
+    The current gap is the age of the oldest unmatched model — the minimum
+    time the open-source frontier has been behind the closed frontier.
     """
     unmatched = [g for g in gaps if not g["matched"]]
 
@@ -328,113 +314,14 @@ def estimate_current_gap(gaps: list[dict], matched_gaps_months: list[float]) -> 
         }
 
     unmatched_ages = sorted([g["gap_months"] for g in unmatched], reverse=True)
-    min_current_gap = max(unmatched_ages)
-
-    if not matched_gaps_months or len(matched_gaps_months) < 3:
-        # Not enough data for proper estimation - use simple heuristic
-        # Assume gaps follow exponential-like decay, estimate mean from censored data
-        estimated = min_current_gap * 1.3  # Add 30% for expected additional wait
-        return {
-            "estimated_current_gap": round(estimated, 1),
-            "min_current_gap": round(min_current_gap, 1),
-            "confidence": "low",
-            "unmatched_ages": [round(a, 1) for a in unmatched_ages],
-            "method": "insufficient_data_heuristic",
-        }
-
-    # Fit log-normal distribution to matched gaps
-    matched_positive = [g for g in matched_gaps_months if g > 0]
-    if len(matched_positive) < 3:
-        estimated = min_current_gap * 1.3
-        return {
-            "estimated_current_gap": round(estimated, 1),
-            "min_current_gap": round(min_current_gap, 1),
-            "confidence": "low",
-            "unmatched_ages": [round(a, 1) for a in unmatched_ages],
-            "method": "insufficient_positive_data",
-        }
-
-    log_matched = np.log(matched_positive)
-    mu_prior = np.mean(log_matched)  # Log-normal mu parameter
-    sigma_prior = np.std(log_matched)  # Log-normal sigma parameter
-
-    if sigma_prior == 0:
-        sigma_prior = 0.5  # Default if no variance
-
-    # MLE update with censored observations
-    # For right-censored data, the likelihood contribution is P(T > t) = 1 - CDF(t)
-    # We use the survival function: S(t) = 1 - Phi((ln(t) - mu) / sigma)
-    #
-    # Bayesian update: posterior mu given censored observations
-    # Each unmatched model tells us the gap is AT LEAST its age
-    # This shifts the posterior mean upward
-
-    # Calculate expected value given truncation at each censored point
-    # E[X | X > c] for log-normal = exp(mu + sigma^2/2) * Phi((mu + sigma^2 - ln(c))/sigma) / S(c)
-
-    def expected_given_greater_than(c, mu, sigma):
-        """E[X | X > c] for log-normal distribution"""
-        if c <= 0:
-            return np.exp(mu + sigma**2 / 2)
-
-        log_c = np.log(c)
-        # Survival function S(c) = P(X > c)
-        z = (log_c - mu) / sigma
-        survival = 1 - norm.cdf(z)
-
-        if survival < 1e-10:
-            # If survival is very small, gap is likely much larger
-            return c * 2  # Heuristic: at least double the censored value
-
-        # E[X | X > c] using truncated log-normal formula
-        z_shifted = (mu + sigma**2 - log_c) / sigma
-        expected = np.exp(mu + sigma**2 / 2) * norm.cdf(z_shifted) / survival
-
-        return expected
-
-    # Calculate expected gap for each unmatched model
-    expected_gaps = []
-    for age in unmatched_ages:
-        if age > 0:
-            exp_gap = expected_given_greater_than(age, mu_prior, sigma_prior)
-            expected_gaps.append(exp_gap)
-
-    if expected_gaps:
-        # Weight by age (older unmatched models are more informative)
-        weights = np.array(unmatched_ages[:len(expected_gaps)])
-        weights = weights / weights.sum() if weights.sum() > 0 else np.ones(len(weights)) / len(weights)
-
-        # Weighted average of expected gaps
-        estimated = np.average(expected_gaps, weights=weights)
-
-        # Ensure estimate is at least the minimum bound
-        estimated = max(estimated, min_current_gap)
-
-        # Calculate confidence based on how far unmatched ages are from prior mean
-        prior_mean = np.exp(mu_prior + sigma_prior**2 / 2)
-        deviation_ratio = min_current_gap / prior_mean if prior_mean > 0 else 2
-
-        if deviation_ratio < 1.5:
-            confidence = "high"
-        elif deviation_ratio < 2.5:
-            confidence = "medium"
-        else:
-            confidence = "low"
-    else:
-        estimated = min_current_gap * 1.3
-        confidence = "low"
+    oldest_unmatched = max(unmatched_ages)
 
     return {
-        "estimated_current_gap": round(float(estimated), 1),
-        "min_current_gap": round(float(min_current_gap), 1),
-        "confidence": confidence,
+        "estimated_current_gap": round(float(oldest_unmatched), 1),
+        "min_current_gap": round(float(oldest_unmatched), 1),
+        "confidence": "high" if len(unmatched) >= 2 else "medium",
         "unmatched_ages": [round(a, 1) for a in unmatched_ages],
-        "method": "survival_analysis_mle",
-        "prior_params": {
-            "mu": round(float(mu_prior), 3),
-            "sigma": round(float(sigma_prior), 3),
-            "prior_mean_months": round(float(np.exp(mu_prior + sigma_prior**2 / 2)), 1),
-        },
+        "method": "oldest_unmatched",
     }
 
 
@@ -442,8 +329,7 @@ def calculate_historical_gaps(
     df: pd.DataFrame,
     score_col: str = "eci",
     threshold: float = ECI_MATCH_THRESHOLD,
-    model_col: str = "Model",
-    threshold_type: str = "additive",
+    model_col: str = "Model"
 ) -> list[dict]:
     """
     Calculate the gap metric at various points in history.
@@ -493,12 +379,7 @@ def calculate_historical_gaps(
         best_closed_score = best_closed[score_col]
 
         # Find the first closed model to achieve the best open's score level
-        if threshold_type == "ratio" and threshold > 0:
-            # For ratio matching: find closed models whose score * threshold <= best_open_score
-            # i.e., closed models that the best open model has "matched"
-            closed_at_open_level = df_closed[df_closed[score_col] * threshold <= best_open_score].sort_values("date")
-        else:
-            closed_at_open_level = df_closed[df_closed[score_col] >= best_open_score - threshold].sort_values("date")
+        closed_at_open_level = df_closed[df_closed[score_col] >= best_open_score - threshold].sort_values("date")
 
         if len(closed_at_open_level) > 0:
             first_closed_at_level = closed_at_open_level.iloc[0]
@@ -510,10 +391,7 @@ def calculate_historical_gaps(
             gap_months = max(0, gap_months)
 
             # Determine if the frontier is "matched" (open has caught up to closed frontier)
-            if threshold_type == "ratio" and threshold > 0:
-                is_matched = best_open_score >= best_closed_score * threshold
-            else:
-                is_matched = best_open_score >= best_closed_score - threshold
+            is_matched = best_open_score >= best_closed_score - threshold
         else:
             # No closed model at this level yet (open is ahead - very rare)
             gap_months = 0
@@ -537,19 +415,9 @@ def calculate_historical_gaps(
 def calculate_statistics(
     df: pd.DataFrame,
     gaps: list[dict],
-    score_col: str = "eci",
-    threshold: float = 0,
-    threshold_type: str = "additive",
+    score_col: str = "eci"
 ) -> dict:
-    """Calculate summary statistics.
-
-    Args:
-        df: DataFrame with model data
-        gaps: Pre-computed gap list from calculate_horizontal_gaps
-        score_col: Column name for scores
-        threshold: Matching threshold (used for ratio-based matching of sampled levels)
-        threshold_type: "additive" or "ratio"
-    """
+    """Calculate summary statistics."""
     df_open = df[df["Open"]].copy()
     df_closed = df[~df["Open"]].copy()
 
@@ -585,14 +453,6 @@ def calculate_statistics(
     df_open_possible = df_open.sort_values("date").copy()
 
     for cur_score in sample_scores:
-        # For ratio matching, the open model target at this level is cur_score * threshold
-        # but we're sampling "closed model achievement levels", so we compare
-        # open models reaching cur_score (or cur_score * threshold for ratio)
-        if threshold_type == "ratio" and threshold > 0:
-            open_target = cur_score * threshold
-        else:
-            open_target = cur_score
-
         closed_candidates = df_closed[df_closed[score_col] >= cur_score].sort_values("date")
         if len(closed_candidates) == 0:
             continue
@@ -602,7 +462,7 @@ def calculate_statistics(
         for _, row in df_open_possible.iterrows():
             if pd.isna(row[score_col]) or pd.isna(row["date"]):
                 continue
-            if row[score_col] >= open_target:
+            if row[score_col] >= cur_score:
                 cur_open_model = row
                 gap = (cur_open_model["date"] - cur_closed_model["date"]).days / 30.5
                 horizontal_gaps.append(gap)
@@ -1000,28 +860,21 @@ def process_metr_data(metr_raw: dict) -> Optional[dict]:
             "source_version": row.get("source_version", ""),
         })
 
-    # METR uses ratio-based matching: open model matches if its horizon
-    # is at least half of the closed model's horizon
-    METR_RATIO_THRESHOLD = 0.5
+    # METR uses exact matching (open model must meet or exceed closed model's horizon)
     gaps = calculate_horizontal_gaps(
         df_frontier,
         score_col="score",
-        threshold=METR_RATIO_THRESHOLD,
-        model_col="model",
-        threshold_type="ratio",
+        threshold=0,
+        model_col="model"
     )
 
-    stats = calculate_statistics(
-        df_frontier, gaps, score_col="score",
-        threshold=METR_RATIO_THRESHOLD, threshold_type="ratio",
-    )
+    stats = calculate_statistics(df_frontier, gaps, score_col="score")
 
     historical_gaps = calculate_historical_gaps(
         df_frontier,
         score_col="score",
-        threshold=METR_RATIO_THRESHOLD,
-        model_col="model",
-        threshold_type="ratio",
+        threshold=0,
+        model_col="model"
     )
 
     # Calculate trends using log scale for horizon (exponential growth)
@@ -1044,9 +897,9 @@ def process_metr_data(metr_raw: dict) -> Optional[dict]:
         df_cu_combined = pd.concat([df_china_models, df_us_models]).sort_values("date")
         df_cu_frontier = df_cu_combined[df_cu_combined["group_rank"] <= 1].copy()
 
-        china_gaps = calculate_horizontal_gaps(df_cu_frontier, score_col="score", threshold=METR_RATIO_THRESHOLD, model_col="model", threshold_type="ratio")
-        china_stats = calculate_statistics(df_cu_frontier, china_gaps, score_col="score", threshold=METR_RATIO_THRESHOLD, threshold_type="ratio")
-        china_historical = calculate_historical_gaps(df_cu_frontier, score_col="score", threshold=METR_RATIO_THRESHOLD, model_col="model", threshold_type="ratio")
+        china_gaps = calculate_horizontal_gaps(df_cu_frontier, score_col="score", threshold=0, model_col="model")
+        china_stats = calculate_statistics(df_cu_frontier, china_gaps, score_col="score")
+        china_historical = calculate_historical_gaps(df_cu_frontier, score_col="score", threshold=0, model_col="model")
         china_framing = {
             "gaps": china_gaps,
             "statistics": china_stats,
