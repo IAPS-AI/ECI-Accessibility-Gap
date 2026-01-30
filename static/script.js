@@ -629,6 +629,7 @@ function renderAll() {
  */
 function renderTrendChart(data) {
     const models = data.trend_models || data.models;
+    const isTrendMetr = appState.currentBenchmark === 'metr_time_horizon';
     const traces = [];
     const annotations = [];
     const scoreField = getScoreField();
@@ -831,7 +832,6 @@ function renderTrendChart(data) {
     const yAxisTitle = appState.currentBenchmark === 'eci' ? 'ECI Score' :
                        appState.currentBenchmark === 'metr_time_horizon' ? 'p50 Time Horizon (minutes)' :
                        (benchmarkMetadata?.unit || 'Score');
-    const isTrendMetr = appState.currentBenchmark === 'metr_time_horizon';
 
     // ECI-specific reference annotations (only show for ECI benchmark)
     const eciAnnotations = appState.currentBenchmark === 'eci' ? [
@@ -974,6 +974,7 @@ function renderTrendChart(data) {
  */
 function renderChart(data) {
     const { models, gaps, statistics, metadata } = data;
+    const isMetr = appState.currentBenchmark === 'metr_time_horizon';
     const labels = getFramingLabels();
     const scoreField = getScoreField();
     const scoreName = metadata?.unit || (appState.currentBenchmark === 'eci' ? 'ECI' : 'Score');
@@ -1240,7 +1241,6 @@ function renderChart(data) {
     const chartYAxisTitle = appState.currentBenchmark === 'eci' ? 'ECI Score' :
                             appState.currentBenchmark === 'metr_time_horizon' ? 'p50 Time Horizon (minutes)' :
                             (metadata?.unit || 'Score');
-    const isMetr = appState.currentBenchmark === 'metr_time_horizon';
 
     // Layout
     const layout = {
