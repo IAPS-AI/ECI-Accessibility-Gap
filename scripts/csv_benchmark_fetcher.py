@@ -96,8 +96,11 @@ OPEN_SOURCE_ORGS = {
     'deepseek', 'meta', 'mistral', 'alibaba', 'qwen', '01.ai',
     'zhipu', 'thudm', 'baichuan', 'bigscience', 'eleutherai',
     'stability ai', 'together', 'shanghai ai', 'idea research',
-    'modelbest', 'hugging face', 'tii', 'databricks'
+    'modelbest', 'hugging face', 'tii', 'databricks', 'moonshot'
 }
+
+# Open-weight model name patterns (catches fine-tunes from orgs not in the lists above)
+OPEN_MODEL_PATTERNS = {'llama', 'gemma'}
 
 # Known closed-source organizations
 CLOSED_SOURCE_ORGS = {
@@ -161,6 +164,11 @@ class CSVBenchmarkFetcher:
                 return True
             if 'api' in accessibility or 'closed' in accessibility:
                 return False
+
+        # Check if model name indicates an open-weight base (e.g. Llama fine-tunes)
+        model_name = str(row.get('Model version', row.get('Model name', ''))).lower()
+        if any(pattern in model_name for pattern in OPEN_MODEL_PATTERNS):
+            return True
 
         # Fall back to organization-based heuristics
         org = str(row.get('Organization', '')).lower() if pd.notna(row.get('Organization')) else ''

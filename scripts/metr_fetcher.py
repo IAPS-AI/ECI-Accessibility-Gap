@@ -60,7 +60,7 @@ US_ORGANIZATIONS = {
 # Open-weight model patterns
 OPEN_MODEL_PATTERNS = [
     "deepseek", "llama", "qwen", "qwq", "mistral_large",
-    "command_r", "gpt_oss", "gpt-oss", "kimi_k2",
+    "command_r", "gpt_oss", "gpt-oss", "kimi_k2", "gemma",
 ]
 
 

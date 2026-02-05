@@ -700,12 +700,16 @@ def process_data() -> dict[str, Any]:
     df["Open"] = df["Model accessibility"].str.contains("Open", na=False)
 
     # Override for models with "Unknown" accessibility that are known to be open weights
-    # Kimi K2.5 is open weights like the other Kimi K2 models, but Epoch AI hasn't updated the classification yet
-    kimi_k2_mask = (
+    # Epoch AI sometimes lags behind on updating accessibility classifications
+    unknown_open_mask = (
         (df["Model accessibility"] == "Unknown") &
-        (df["Model"].str.contains("Kimi K2", case=False, na=False))
+        (
+            df["Model"].str.contains("Kimi K2", case=False, na=False) |
+            df["Organization"].str.contains("DeepSeek", case=False, na=False) |
+            df["Organization"].str.contains("Moonshot", case=False, na=False)
+        )
     )
-    df.loc[kimi_k2_mask, "Open"] = True
+    df.loc[unknown_open_mask, "Open"] = True
 
     df["is_china"] = df["Organization"].apply(is_china_org)
     df["is_us"] = df["Organization"].apply(is_us_org)
